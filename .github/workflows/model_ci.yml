@@ -1,0 +1,287 @@
+name: Model Pipeline CI/CD
+
+on:
+  workflow_dispatch:  # Manual trigger only
+
+jobs:
+  # ===========================================================================
+  # JOB 1 — Unit Tests
+  # ===========================================================================
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        working-directory: model_pipeline
+        run: |
+          pip install --upgrade pip
+          pip install -e .
+          if [ -f model-requirements.txt ]; then pip install -r model-requirements.txt; fi
+
+      - name: Run unit tests
+        working-directory: model_pipeline
+        run: |
+          python -m pytest \
+            tests/data/test_data_loader.py \
+            tests/data/test_validate_data.py \
+            tests/deterministic_engine/test_downgrade_engine.py \
+            tests/deterministic_engine/test_financial_engine.py \
+            tests/deterministic_engine/test_labeling_pipeline.py \
+            tests/features/test_feature_engineering.py \
+            tests/features/test_feature_preprocessing.py \
+            tests/features/test_financial_features.py \
+            tests/features/test_product_features.py \
+            tests/features/test_review_features.py \
+            tests/guards/test_bias_detection.py \
+            -v --tb=short
+
+  # ===========================================================================
+  # JOB 2 — DB Connection Check
+  # ===========================================================================
+  db-connection-check:
+    name: DB Connection Check
+    runs-on: ubuntu-latest
+    needs: unit-tests
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        working-directory: model_pipeline
+        run: |
+          pip install --upgrade pip
+          pip install sqlalchemy psycopg2-binary
+          if [ -f model-requirements.txt ]; then pip install -r model-requirements.txt; fi
+
+      - name: Check DB connection
+        working-directory: model_pipeline
+        env:
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_PORT: ${{ secrets.DB_PORT }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+        run: |
+          python3 - <<'EOF'
+          import os, sys
+          if not os.getenv("DB_HOST"):
+              print("No DB_HOST configured — skipping DB connection check.")
+              sys.exit(0)
+          try:
+              from sqlalchemy import create_engine, text
+              url = f"postgresql://{os.environ['DB_USER']}:{os.environ['DB_PASSWORD']}@{os.environ['DB_HOST']}:{os.environ.get('DB_PORT', '5432')}/{os.environ['DB_NAME']}"
+              engine = create_engine(url)
+              with engine.connect() as conn:
+                  result = conn.execute(text("SELECT 1"))
+                  print(f"DB connection OK: {result.scalar()}")
+          except Exception as e:
+              print(f"DB connection FAILED: {e}")
+              sys.exit(1)
+          EOF
+
+  # ===========================================================================
+  # JOB 3 — Validation Gate
+  # Blocks if F1 < 0.70 or ROC AUC < 0.75
+  # ===========================================================================
+  validation-gate:
+    name: Validation Gate
+    runs-on: ubuntu-latest
+    needs: unit-tests
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check validation thresholds
+        working-directory: model_pipeline
+        env:
+          F1_THRESHOLD: "0.70"
+          ROC_AUC_THRESHOLD: "0.75"
+        run: |
+          python3 - <<'EOF'
+          import os, sys
+
+          metrics_file = "metrics.txt"
+          if not os.path.exists(metrics_file):
+              print("No metrics file found — skipping validation gate.")
+              sys.exit(0)
+
+          metrics = {}
+          with open(metrics_file) as f:
+              for line in f:
+                  k, v = line.strip().split("=")
+                  metrics[k.strip()] = float(v.strip())
+
+          f1      = metrics.get("f1_score", 0.0)
+          roc_auc = metrics.get("roc_auc", 0.0)
+          f1_thresh  = float(os.environ["F1_THRESHOLD"])
+          roc_thresh = float(os.environ["ROC_AUC_THRESHOLD"])
+
+          print(f"F1 Score: {f1:.4f} (threshold: >{f1_thresh})")
+          print(f"ROC AUC:  {roc_auc:.4f} (threshold: >{roc_thresh})")
+
+          failed = []
+          if f1 < f1_thresh:
+              failed.append(f"F1 {f1:.4f} < {f1_thresh}")
+          if roc_auc < roc_thresh:
+              failed.append(f"ROC AUC {roc_auc:.4f} < {roc_thresh}")
+
+          if failed:
+              print(f"VALIDATION GATE FAILED: {', '.join(failed)}")
+              sys.exit(1)
+          print("VALIDATION GATE PASSED")
+          EOF
+
+  # ===========================================================================
+  # JOB 4 — Bias Detection Gate
+  # Blocks if Max F1 disparity >= 0.10
+  # ===========================================================================
+  bias-gate:
+    name: Bias Detection Gate
+    runs-on: ubuntu-latest
+    needs: unit-tests
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check bias thresholds
+        working-directory: model_pipeline
+        env:
+          BIAS_THRESHOLD: "0.10"
+        run: |
+          python3 - <<'EOF'
+          import os, sys
+
+          bias_file = "bias_metrics.txt"
+          if not os.path.exists(bias_file):
+              print("No bias metrics file found — skipping bias gate.")
+              sys.exit(0)
+
+          threshold  = float(os.environ["BIAS_THRESHOLD"])
+          violations = []
+
+          with open(bias_file) as f:
+              for line in f:
+                  k, v = line.strip().split("=")
+                  val = float(v.strip())
+                  if abs(val) >= threshold:
+                      violations.append(f"{k.strip()}={val:.4f}")
+
+          if violations:
+              print(f"BIAS GATE FAILED — disparity >= {threshold}:")
+              for v in violations:
+                  print(f"  {v}")
+              sys.exit(1)
+          print(f"BIAS GATE PASSED -- all disparities < {threshold}")
+          EOF
+
+  # ===========================================================================
+  # JOB 5 — Rollback Check
+  # Blocks if F1 drops more than 0.02 vs previous model
+  # ===========================================================================
+  rollback-check:
+    name: Rollback Check
+    runs-on: ubuntu-latest
+    needs: [validation-gate, bias-gate]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check rollback threshold
+        working-directory: model_pipeline
+        env:
+          ROLLBACK_THRESHOLD: "0.02"
+        run: |
+          python3 - <<'EOF'
+          import os, sys
+
+          current_file  = "metrics.txt"
+          previous_file = "previous_metrics.txt"
+
+          if not os.path.exists(current_file) or not os.path.exists(previous_file):
+              print("Metrics files not found — skipping rollback check.")
+              sys.exit(0)
+
+          def read_metrics(path):
+              m = {}
+              with open(path) as f:
+                  for line in f:
+                      k, v = line.strip().split("=")
+                      m[k.strip()] = float(v.strip())
+              return m
+
+          current   = read_metrics(current_file)
+          previous  = read_metrics(previous_file)
+          curr_f1   = current.get("f1_score", 0.0)
+          prev_f1   = previous.get("f1_score", 0.0)
+          threshold = float(os.environ["ROLLBACK_THRESHOLD"])
+          drop      = prev_f1 - curr_f1
+
+          print(f"Previous F1: {prev_f1:.4f}")
+          print(f"Current F1:  {curr_f1:.4f}")
+          print(f"Drop:        {drop:.4f} (max allowed: {threshold})")
+
+          if drop > threshold:
+              print(f"ROLLBACK CHECK FAILED — F1 dropped by {drop:.4f}")
+              sys.exit(1)
+          print("ROLLBACK CHECK PASSED ✅")
+          EOF
+
+  # ===========================================================================
+  # JOB 6 — Notify on Failure
+  # ===========================================================================
+  notify-on-failure:
+    name: Notify on Failure
+    runs-on: ubuntu-latest
+    needs: [unit-tests, db-connection-check, validation-gate, bias-gate, rollback-check]
+    if: failure()
+
+    steps:
+      - name: Send failure notification
+        run: |
+          echo "CI/CD pipeline FAILED"
+          echo "Branch:       ${{ github.ref_name }}"
+          echo "Commit:       ${{ github.sha }}"
+          echo "Triggered by: ${{ github.actor }}"
+          # Uncomment when Slack webhook is ready:
+          # curl -X POST ${{ secrets.SLACK_WEBHOOK_URL }} \
+          #   -H 'Content-type: application/json' \
+          #   --data '{"text":" SavVio Model CI/CD FAILED on ${{ github.ref_name }} by ${{ github.actor }}"}'
+
+  # ===========================================================================
+  # JOB 7 — Notify on Success
+  # ===========================================================================
+  notify-on-success:
+    name: Notify on Success
+    runs-on: ubuntu-latest
+    needs: [unit-tests, db-connection-check, validation-gate, bias-gate, rollback-check]
+    if: success()
+
+    steps:
+      - name: Send success notification
+        run: |
+          echo "CI/CD pipeline PASSED"
+          echo "Branch:       ${{ github.ref_name }}"
+          echo "Commit:       ${{ github.sha }}"
+          echo "Triggered by: ${{ github.actor }}"
+          # Uncomment when Slack webhook is ready:
+          # curl -X POST ${{ secrets.SLACK_WEBHOOK_URL }} \
+          #   -H 'Content-type: application/json' \
+          #   --data '{"text":" SavVio Model CI/CD PASSED on ${{ github.ref_name }}"}'

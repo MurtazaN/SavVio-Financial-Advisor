@@ -1,0 +1,136 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv
+.savvio_venv/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Jupyter Notebooks
+.ipynb_checkpoints
+*.ipynb_checkpoints/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# DVC
+.dvc/cache
+.dvc/tmp
+.dvcignore
+
+# Data files (large files should be tracked with DVC)
+data_pipeline/data/raw/*
+data_pipeline/data/processed/*
+data_pipeline/data/validated/*
+data_pipeline/dags/data/quarantine/*
+!data_pipeline/data/raw/.gitkeep
+!data_pipeline/data/processed/.gitkeep
+!data_pipeline/data/validated/.gitkeep
+
+# Model artifacts (tracked with DVC or model registry)
+model_pipeline/models/*
+!model_pipeline/models/.gitkeep
+model_pipeline/data/*
+!model_pipeline/data/.gitkeep
+model_pipeline/experiments/*
+!model_pipeline/experiments/.gitkeep
+
+# Logs
+*.log
+logs/
+data_pipeline/logs/*
+!data_pipeline/logs/.gitkeep
+
+# Airflow
+airflow.cfg
+airflow.db
+airflow-webserver.pid
+airflow-webserver-monitor.pid
+
+# MLflow
+mlruns/
+mlflow.db
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
+
+# Docker
+*.dockerignore
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+# Kubernetes
+*.kubeconfig
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Secrets and credentials
+secrets/
+credentials/
+data_pipeline/config/
+*.pem
+*.key
+*.crt
+
+# Compiled files
+*.pyc
+*.pyo
+*.pyd
+.env
+
+# temp_data
+*/temp_data/*
+
+# Configs and Artifacts
+config/
+model_pipeline/artifacts/
+
+# Jupyter Notebooks
+model_pipeline/experiments/

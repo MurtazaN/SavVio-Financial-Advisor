@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "savviocore"
+version = "0.1.0"
+description = "Shared DB and Validation logic for SavVio"
+dependencies = [
+    "SQLAlchemy>=2.0",
+    "pydantic",
+    "pandas",
+    "great_expectations"
+]
+requires-python = ">=3.9"
+
+[tool.setuptools.packages.find]
+where = ["src"]

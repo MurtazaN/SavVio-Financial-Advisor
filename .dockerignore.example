@@ -1,0 +1,50 @@
+# Data files (managed by DVC, not needed in image)
+data/
+*.csv
+*.jsonl
+data/
+data_pipeline/dags/data/
+data_pipeline/succes_media/
+
+# Mlflow informarion
+model_pipeline/experiments/
+model_pipeline/models/
+
+# DVC
+.dvc
+.dvc/cache
+.dvc/tmp
+
+# Git
+.git/
+
+# Python artifacts
+**/__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# IDE files
+.vscode/
+.idea/
+
+# Logs
+logs/
+
+# Environment/secrets
+.env
+*.pem
+config/database.yaml
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Documentation (not needed at runtime)
+docs/
+*.md

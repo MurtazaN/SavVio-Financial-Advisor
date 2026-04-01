@@ -1,0 +1,33 @@
+::group::Log message source detailssources=["/opt/airflow/logs/dag_id=Data_pipeline_airflow/run_id=manual__2026-02-22T16:50:13.167715+00:00/task_id=check_db_loading/attempt=4.log"] 
+::endgroup::
+[2026-02-23T00:03:13.992929Z] INFO - DAG bundles loaded: dags-folder
+[2026-02-23T00:03:13.995954Z] INFO - Filling up the DagBag from /opt/airflow/dags/data_pipeline_airflow.py
+[2026-02-23T00:03:14.404186Z] INFO - Changing working directory to: /opt/airflow/dags
+[2026-02-23T00:03:20.877970Z] WARNING - /opt/airflow/dags/data_pipeline_airflow.py:19: DeprecatedImportWarning: The `airflow.utils.trigger_rule.TriggerRule` attribute is deprecated. Please use `'airflow.task.trigger_rule.TriggerRule'`.
+  from airflow.utils.trigger_rule import TriggerRule
+
+[2026-02-23T00:03:20.879848Z] WARNING - /home/airflow/.local/lib/python3.12/site-packages/airflow/providers/smtp/operators/smtp.py:82: RemovedInAirflow4Warning: Setting email on a task is deprecated; please migrate to SmtpNotifier.
+  super().__init__(**kwargs)
+
+[2026-02-23T00:03:20.880005Z] WARNING - /home/airflow/.local/lib/python3.12/site-packages/airflow/providers/smtp/operators/smtp.py:82: RemovedInAirflow4Warning: Setting email_on_retry on a task is deprecated; please migrate to SmtpNotifier.
+  super().__init__(**kwargs)
+
+[2026-02-23T00:03:20.880185Z] WARNING - /home/airflow/.local/lib/python3.12/site-packages/airflow/providers/smtp/operators/smtp.py:82: RemovedInAirflow4Warning: Setting email_on_failure on a task is deprecated; please migrate to SmtpNotifier.
+  super().__init__(**kwargs)
+
+[2026-02-23T00:03:20.881285Z] WARNING - /home/airflow/.local/lib/python3.12/site-packages/airflow/providers/standard/operators/python.py:191: RemovedInAirflow4Warning: Setting email on a task is deprecated; please migrate to SmtpNotifier.
+  super().__init__(**kwargs)
+
+[2026-02-23T00:03:20.881397Z] WARNING - /home/airflow/.local/lib/python3.12/site-packages/airflow/providers/standard/operators/python.py:191: RemovedInAirflow4Warning: Setting email_on_retry on a task is deprecated; please migrate to SmtpNotifier.
+  super().__init__(**kwargs)
+
+[2026-02-23T00:03:20.881549Z] WARNING - /home/airflow/.local/lib/python3.12/site-packages/airflow/providers/standard/operators/python.py:191: RemovedInAirflow4Warning: Setting email_on_failure on a task is deprecated; please migrate to SmtpNotifier.
+  super().__init__(**kwargs)
+
+[2026-02-23T00:03:20.909521Z] INFO - Branch check — upstream states: {'load_products': 'success', 'generate_load_embeddings': 'success', 'load_reviews': 'success', 'load_financial_profiles': 'success'}
+[2026-02-23T00:03:20.909715Z] INFO - All upstream tasks succeeded — continuing pipeline
+[2026-02-23T00:03:20.909879Z] INFO - Done. Returned value was: ['send_email_pipeline_success']
+[2026-02-23T00:03:20.909918Z] INFO - Branch into ['send_email_pipeline_success']
+[2026-02-23T00:03:20.910340Z] INFO - Following branch {'send_email_pipeline_success'}
+[2026-02-23T00:03:20.910401Z] INFO - Skipping tasks [('send_email_at_DB_loading_error', -1)]
+[2026-02-23T00:03:20.916881Z] INFO - Skipping downstream tasks.

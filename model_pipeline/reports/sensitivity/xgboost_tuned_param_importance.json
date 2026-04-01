@@ -1,0 +1,27 @@
+{
+  "model_name": "xgboost_tuned",
+  "study_name": "xgboost_tuning",
+  "completed_trials": 50,
+  "top_importances": [
+    {
+      "param": "n_estimators",
+      "importance": 0.3906758706505331
+    },
+    {
+      "param": "reg_lambda",
+      "importance": 0.16118714621833796
+    },
+    {
+      "param": "max_depth",
+      "importance": 0.15808157959642966
+    },
+    {
+      "param": "reg_alpha",
+      "importance": 0.09078220136729469
+    },
+    {
+      "param": "learning_rate",
+      "importance": 0.08565164102324581
+    }
+  ]
+}
