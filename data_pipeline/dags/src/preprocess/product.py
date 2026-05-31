@@ -324,15 +324,8 @@ def preprocess_product_data(input_path: str, output_path: str) -> pd.DataFrame:
 
     os.remove(stage1_path)
 
-    # --- Incremental merge: merge new output with existing preprocessed file ---
-    if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-        from src.incremental import merge_jsonl
-        merge_stats = merge_jsonl(new_output_path, output_path, key_cols=["product_id"])
-        os.remove(new_output_path)
-        LOGGER.info("Incremental merge stats: %s", merge_stats)
-    else:
-        # First run — just move temp to output.
-        os.replace(new_output_path, output_path)
+    # Each run is independent — overwrite the output directly.
+    os.replace(new_output_path, output_path)
 
     initial_view = pd.DataFrame(columns=sorted(discovered_columns))
     _print_frame_snapshot(

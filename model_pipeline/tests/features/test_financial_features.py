@@ -80,13 +80,14 @@ class TestComputeAffordability:
         result = compute_affordability(profile, product_price=50.0)
         assert result.residual_utility_score is None
 
-    def test_to_dict_has_all_6_keys(self):
+    def test_to_dict_has_all_keys(self):
         result = compute_affordability(self._default_profile(), 100)
         d = result.to_dict()
-        assert len(d) == 6
+        assert len(d) == 7
         expected_keys = {
             "affordability_score", "price_to_income_ratio", "residual_utility_score",
             "savings_to_price_ratio", "net_worth_indicator", "credit_risk_indicator",
+            "affordability_score_unreliable",
         }
         assert set(d.keys()) == expected_keys
 

@@ -144,16 +144,8 @@ def run_review_features(
             f"{n_matched}/{n_total_products} products had review data."
         )
 
-        # --- Incremental merge: product featured output ---
-        if os.path.exists(product_output_path) and os.path.getsize(product_output_path) > 0:
-            from src.incremental import merge_jsonl
-            merge_stats = merge_jsonl(
-                temp_product_output, product_output_path, key_cols=["product_id"]
-            )
-            os.remove(temp_product_output)
-            logger.info("Product incremental merge stats: %s", merge_stats)
-        else:
-            os.replace(temp_product_output, product_output_path)
+        # Each run is independent — overwrite the output directly.
+        os.replace(temp_product_output, product_output_path)
         logger.info(f"Saved enriched products to {product_output_path}")
 
         # --------------------------------------------------------------

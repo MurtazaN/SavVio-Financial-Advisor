@@ -50,6 +50,7 @@ class AffordabilityResult:
     savings_to_price_ratio: Optional[float]
     net_worth_indicator: Optional[float]
     credit_risk_indicator: Optional[float]
+    affordability_score_unreliable: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -59,6 +60,7 @@ class AffordabilityResult:
             "savings_to_price_ratio": self.savings_to_price_ratio,
             "net_worth_indicator": self.net_worth_indicator,
             "credit_risk_indicator": self.credit_risk_indicator,
+            "affordability_score_unreliable": self.affordability_score_unreliable,
         }
 
 
@@ -102,6 +104,7 @@ def compute_affordability(
         savings_to_price_ratio=values["savings_to_price_ratio"],
         net_worth_indicator=values["net_worth_indicator"],
         credit_risk_indicator=values["credit_risk_indicator"],
+        affordability_score_unreliable=bool(values.get("affordability_score_unreliable", False)),
     )
 
     logger.info(

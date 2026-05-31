@@ -8,6 +8,36 @@ the highest downstream impact on the agent's purchase guardrail decisions.
 Product and review data quality is already covered by raw/processed validators.
 """
 
+# ---------------------------------------------------------------------------
+# Self-healing import path setup (same pattern as run_ingestion.py).
+# ---------------------------------------------------------------------------
+import sys as _sys, os as _os, importlib.util as _ilu
+
+def _ensure_src_package() -> None:
+    _d = _os.path.abspath(__file__)
+    while _os.path.basename(_d) not in ("dags", "") and _d != _os.path.dirname(_d):
+        _d = _os.path.dirname(_d)
+    if _os.path.basename(_d) != "dags":
+        return
+    if _d not in _sys.path:
+        _sys.path.insert(0, _d)
+    _src_dir = _os.path.join(_d, "src")
+    _mod = _sys.modules.get("src")
+    _is_ns = _mod is None or getattr(getattr(_mod, "__spec__", None), "origin", None) is None
+    if _is_ns:
+        _init = _os.path.join(_src_dir, "__init__.py")
+        _spec = _ilu.spec_from_file_location("src", _init, submodule_search_locations=[_src_dir])
+        if _spec and _spec.loader:
+            _m = _ilu.module_from_spec(_spec)
+            _m.__path__ = [_src_dir]  # type: ignore[assignment]
+            _m.__package__ = "src"
+            _sys.modules["src"] = _m
+            _spec.loader.exec_module(_m)  # type: ignore[union-attr]
+
+_ensure_src_package()
+del _sys, _os, _ilu, _ensure_src_package
+# ---------------------------------------------------------------------------
+
 import logging
 import sys
 import os

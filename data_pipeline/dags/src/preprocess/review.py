@@ -142,17 +142,16 @@ def _process_batch(
     df["helpful_vote"] = pd.to_numeric(df["helpful_vote"], errors="coerce").fillna(0).astype(int)
     df["verified_purchase"] = df["verified_purchase"].apply(_to_bool).astype(bool)
 
-    # Global duplicate key: (asin + user_id)
-    keys = list(zip(df["asin"], df["user_id"]))
-    keep_mask = []
-    for key in keys:
-        if key in seen_review_keys:
-            keep_mask.append(False)
-        else:
-            seen_review_keys.add(key)
-            keep_mask.append(True)
+    # Global duplicate key: (asin + user_id).
+    # Two-pass dedup: first drop within-batch duplicates (keep first),
+    # then drop rows whose key was already seen in a previous batch.
+    key_series = df["asin"] + "\x00" + df["user_id"]
+    is_new = ~key_series.isin(seen_review_keys)
+    first_occurrence = ~key_series.duplicated(keep="first")
+    keep_mask = is_new & first_occurrence
+    seen_review_keys.update(key_series[keep_mask].tolist())
 
-    duplicate_count = len(keep_mask) - int(sum(keep_mask))
+    duplicate_count = int((~keep_mask).sum())
     if duplicate_count:
         stats.duplicates_removed += duplicate_count
         df = df.loc[keep_mask].copy()
@@ -250,17 +249,8 @@ def preprocess_review_data(input_path: str, output_path: str) -> pd.DataFrame:
 
     _print_snapshot(final_sample, title=f"Final Review Sample (rows saved: {stats.final_rows})", rows=5)
 
-    # --- Incremental merge: merge new output with existing preprocessed file ---
-    if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-        from src.incremental import merge_jsonl
-        merge_stats = merge_jsonl(
-            new_output_path, output_path, key_cols=["user_id", "product_id"]
-        )
-        os.remove(new_output_path)
-        LOGGER.info("Incremental merge stats: %s", merge_stats)
-    else:
-        # First run — just move temp to output.
-        os.replace(new_output_path, output_path)
+    # Each run is independent — overwrite the output directly.
+    os.replace(new_output_path, output_path)
 
     LOGGER.info(
         "Dropped fields timestamp/images: not useful for text embeddings or sentiment analytics and add noise."

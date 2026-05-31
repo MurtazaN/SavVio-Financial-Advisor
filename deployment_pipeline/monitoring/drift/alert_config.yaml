@@ -1,0 +1,67 @@
+# SavVio Drift Alert Configuration
+# Used by drift_detector.py to determine severity and notification routing.
+
+# ---------------------------------------------------------------------------
+# Drift thresholds — share of monitored columns that must drift to trigger
+# ---------------------------------------------------------------------------
+drift_thresholds:
+  green:  0.10   # < 10% columns drifted — stable, no action
+  yellow: 0.50   # 10–50% columns drifted — monitor closely  (fixed: was 0.25, same as red)
+  red:    0.50   # ≥ 50% columns drifted — alert, consider retraining
+
+# ---------------------------------------------------------------------------
+# Per-column Wasserstein distance thresholds
+# Rating features use a tighter threshold (0.05) since average_rating
+# already reached 0.069 in initial testing and drives recommendations.
+# ---------------------------------------------------------------------------
+column_thresholds:
+  default: 0.10
+  overrides:
+    average_rating:  0.05
+    rating_variance: 0.05
+    rating_number:   0.05
+
+# ---------------------------------------------------------------------------
+# Output distribution drift
+# Alerts when a GREEN/YELLOW/RED label share shifts by more than this fraction
+# ---------------------------------------------------------------------------
+output_shift_threshold: 0.15
+
+# ---------------------------------------------------------------------------
+# Latency SLA
+# ---------------------------------------------------------------------------
+latency_sla_seconds: 2.0
+
+# ---------------------------------------------------------------------------
+# Monitored features
+# NOTE: 'price' removed from product features — not present in baseline CSV.
+# Add it back once baseline is regenerated with price included.
+# ---------------------------------------------------------------------------
+monitored_features:
+  financial:
+    - discretionary_income
+    - debt_to_income_ratio
+    - monthly_expense_burden_ratio
+    - emergency_fund_months
+    - saving_to_income_ratio
+  product:
+    - average_rating
+    - rating_number
+    - rating_variance
+
+# ---------------------------------------------------------------------------
+# Notification routing
+# Controls which channels receive alerts at each severity level.
+# ---------------------------------------------------------------------------
+notification:
+  slack:
+    enabled: true
+    webhook_env_var: SLACK_WEBHOOK_URL   # set in .env or CI secrets
+    notify_on:
+      - YELLOW
+      - RED
+  email:
+    enabled: true
+    recipients_env_var: ALERT_EMAIL_LIST  # comma-separated emails in .env
+    notify_on:
+      - RED                               # email only on RED to avoid noise

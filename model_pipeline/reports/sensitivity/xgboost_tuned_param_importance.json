@@ -5,23 +5,23 @@
   "top_importances": [
     {
       "param": "n_estimators",
-      "importance": 0.3906758706505331
-    },
-    {
-      "param": "reg_lambda",
-      "importance": 0.16118714621833796
-    },
-    {
-      "param": "max_depth",
-      "importance": 0.15808157959642966
-    },
-    {
-      "param": "reg_alpha",
-      "importance": 0.09078220136729469
+      "importance": 0.39338658177631786
     },
     {
       "param": "learning_rate",
-      "importance": 0.08565164102324581
+      "importance": 0.19380177983376573
+    },
+    {
+      "param": "reg_lambda",
+      "importance": 0.15584005608076176
+    },
+    {
+      "param": "subsample",
+      "importance": 0.07248069998969316
+    },
+    {
+      "param": "max_depth",
+      "importance": 0.06883525821791969
     }
   ]
 }

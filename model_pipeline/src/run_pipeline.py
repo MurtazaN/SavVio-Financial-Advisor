@@ -30,6 +30,8 @@ from core_models.train import train_model, log_model_to_mlflow
 from core_models.evaluate import evaluate_model
 from core_models.optuna_tuner import tune_best_candidate
 from core_models.sensitivity_analysis import analyze_optuna_sensitivity
+from llm.prompt_engin import apply_llm_guardrails
+from llm.config import LLMConfig
 
 logger = logging.getLogger(__name__)
 
@@ -108,15 +110,24 @@ def write_evaluation_summary_md(candidates, best, final_metrics, output_path, se
 # Bias detection — placeholder until module is complete.
 # ---------------------------------------------------------------------------
 try:
-    from guards.bias_detection import evaluate_bias
+    from guards.bias_detection import (
+        attach_savings_band_to_sensitive,
+        detect_and_mitigate,
+        predict_with_sensitive_features,
+    )
     BIAS_AVAILABLE = True
 except ImportError:
     logger.warning("Bias detection module not available — skipping bias checks.")
     BIAS_AVAILABLE = False
 
-# Temporarily force-disable bias checks until bias module contract is finalized.
-BIAS_AVAILABLE = False
+    def attach_savings_band_to_sensitive(sens_df, scenarios_df):
+        return sens_df
 
+    def predict_with_sensitive_features(model, X, sensitive=None):
+        return model.predict(X)
+
+# Temporarily force-disable bias checks until bias module contract is finalized.
+BIAS_AVAILABLE = True
 # ---------------------------------------------------------------------------
 # 1. Initialization
 # ---------------------------------------------------------------------------
@@ -143,10 +154,27 @@ def prepare_data():
 
     Returns:
         dict with keys: X_train, X_val, X_test, y_train, y_val, y_test,
-                        sens_train, sens_val, sens_test, label_encoder, scenarios_raw
+                        sens_train, sens_val, sens_test, label_encoder, scenarios_raw,
+                        scenarios_val (same rows as X_val / sens_val for bias checks)
     """
     # Feature engineering + deterministic labeling (GREEN/YELLOW/RED).
     X, y_raw, scenarios_raw = build_training_data(is_training=True)
+
+    # Remove synthetic rows (injected by augment_near_zero_savings) before splitting.
+    # The docstring for augment_near_zero_savings requires these be excluded from
+    # any held-out evaluation set; without this filter they contaminate val/test
+    # bias metrics for the savings_band slice.
+    if "synthetic_flag" in scenarios_raw.columns:
+        real_mask = (scenarios_raw["synthetic_flag"] != 1).values
+        n_synthetic = int((~real_mask).sum())
+        if n_synthetic > 0:
+            logger.info("Removing %d synthetic rows before train/val/test split.", n_synthetic)
+            scenarios_raw = scenarios_raw[real_mask].reset_index(drop=True)
+            if hasattr(X, "reset_index"):
+                X = X[real_mask].reset_index(drop=True)
+            else:
+                X = X[real_mask]
+            y_raw = y_raw[real_mask].reset_index(drop=True)
 
     # Encode string labels into integers for model training.
     label_encoder = LabelEncoder()
@@ -161,27 +189,46 @@ def prepare_data():
     sensitive_features = scenarios_raw[sensitive_cols] if sensitive_cols else None
 
     # --- 3-way stratified split: train (60%) / val (20%) / test (20%) ---
+    # Split scenarios_raw (and sensitive cols) in the SAME calls as X, y so row
+    # alignment is guaranteed for post-training bias detection on the val set.
     # First split: separate test set (20%).
-    X_temp, X_test, y_temp, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=Config.RANDOM_STATE, stratify=y,
-    )
-    sens_temp, sens_test = (None, None)
     if sensitive_features is not None:
-        sens_temp, sens_test = train_test_split(
-            sensitive_features, test_size=0.2,
-            random_state=Config.RANDOM_STATE, stratify=y,
+        X_temp, X_test, y_temp, y_test, scenarios_temp, scenarios_test, sens_temp, sens_test = train_test_split(
+            X, y, scenarios_raw, sensitive_features,
+            test_size=0.2,
+            random_state=Config.RANDOM_STATE,
+            stratify=y,
         )
+    else:
+        X_temp, X_test, y_temp, y_test, scenarios_temp, scenarios_test = train_test_split(
+            X, y, scenarios_raw,
+            test_size=0.2,
+            random_state=Config.RANDOM_STATE,
+            stratify=y,
+        )
+        sens_temp, sens_test = None, None
 
     # Second split: separate validation from training (25% of remaining = 20% of total).
-    X_train, X_val, y_train, y_val = train_test_split(
-        X_temp, y_temp, test_size=0.25, random_state=Config.RANDOM_STATE, stratify=y_temp,
-    )
-    sens_train, sens_val = (None, None)
     if sens_temp is not None:
-        sens_train, sens_val = train_test_split(
-            sens_temp, test_size=0.25,
-            random_state=Config.RANDOM_STATE, stratify=y_temp,
+        X_train, X_val, y_train, y_val, scenarios_train, scenarios_val, sens_train, sens_val = train_test_split(
+            X_temp, y_temp, scenarios_temp, sens_temp,
+            test_size=0.25,
+            random_state=Config.RANDOM_STATE,
+            stratify=y_temp,
         )
+    else:
+        X_train, X_val, y_train, y_val, scenarios_train, scenarios_val = train_test_split(
+            X_temp, y_temp, scenarios_temp,
+            test_size=0.25,
+            random_state=Config.RANDOM_STATE,
+            stratify=y_temp,
+        )
+        sens_train, sens_val = None, None
+
+    # Derive savings_band from scenario financial columns (for ThresholdOptimizer axis).
+    sens_train = attach_savings_band_to_sensitive(sens_train, scenarios_train)
+    sens_val = attach_savings_band_to_sensitive(sens_val, scenarios_val)
+    sens_test = attach_savings_band_to_sensitive(sens_test, scenarios_test)
 
     logger.info("Split sizes — train: %d, val: %d, test: %d", len(y_train), len(y_val), len(y_test))
 
@@ -189,7 +236,9 @@ def prepare_data():
         "X_train": X_train, "X_val": X_val, "X_test": X_test,
         "y_train": y_train, "y_val": y_val, "y_test": y_test,
         "sens_train": sens_train, "sens_val": sens_val, "sens_test": sens_test,
-        "label_encoder": label_encoder, "scenarios_raw": scenarios_raw,
+        "label_encoder": label_encoder,
+        "scenarios_raw": scenarios_raw,
+        "scenarios_val": scenarios_val,
     }
 
 
@@ -197,9 +246,17 @@ def prepare_data():
 # 3. Train Candidates
 # ---------------------------------------------------------------------------
 
-def train_candidates(X_train, y_train, X_val, y_val, sens_val, label_encoder):
+def train_candidates(
+    X_train, y_train, X_val, y_val,
+    sens_train, sens_val, label_encoder,
+    scenarios_val=None,
+):
     """
-    Train all model candidates, evaluate on validation set, run bias checks.
+    Train all model candidates, evaluate on validation set, run bias detection
+    and optional ThresholdOptimizer mitigation (detect_and_mitigate).
+
+    Args:
+        scenarios_val: Raw scenario rows aligned with X_val / y_val (for slice derivation).
 
     Returns:
         List of dicts, each with: name, model, run_id, metrics, bias_passed.
@@ -243,14 +300,36 @@ def train_candidates(X_train, y_train, X_val, y_val, sens_val, label_encoder):
                 )
 
                 # Bias detection — placeholder until module is complete.
+                
                 bias_passed = True
-                if BIAS_AVAILABLE and sens_val is not None:
+                if BIAS_AVAILABLE and sens_val is not None and sens_train is not None:
                     y_pred_val = model.predict(X_val)
-                    bias_results, bias_passed = evaluate_bias(y_val, y_pred_val, sens_val)
+                    y_prob_val = (
+                        model.predict_proba(X_val)
+                        if hasattr(model, "predict_proba")
+                        else None
+                    )
+                    green_class_idx = int(label_encoder.transform(["GREEN"])[0])
+                    model, bias_passed, fairness_metrics = detect_and_mitigate(
+                        model,
+                        X_train,
+                        y_train,
+                        X_val,
+                        y_val,
+                        y_pred_val,
+                        sens_train,
+                        sens_val,
+                        scenarios_raw=scenarios_val,
+                        y_prob_val=y_prob_val,
+                        green_class_idx=green_class_idx,
+                    )
                     mlflow.log_metric("bias_gate_passed", int(bias_passed))
 
-                # Log model artifact.
-                signature = infer_signature(X_train, model.predict(X_train))
+                # Log model artifact (possibly mitigated).
+                signature = infer_signature(
+                    X_train,
+                    predict_with_sensitive_features(model, X_train, sens_train),
+                )
                 log_model_to_mlflow(model, model_type, signature)
 
                 # Log scenario artifact for reproducibility.
@@ -265,6 +344,7 @@ def train_candidates(X_train, y_train, X_val, y_val, sens_val, label_encoder):
                     "run_id": run_id,
                     "metrics": metrics,
                     "bias_passed": bias_passed,
+                    "fairness_metrics": fairness_metrics if BIAS_AVAILABLE else {},
                 })
                 logger.info("%s — val F1: %.4f, bias passed: %s",
                             model_type, metrics["f1_score"], bias_passed)
@@ -305,7 +385,38 @@ def tune_candidate(candidates, data):
                     label_names=list(data["label_encoder"].classes_),
                 )
 
-                signature = infer_signature(data["X_train"], tuned_model.predict(data["X_train"]))
+                bias_passed = True
+                if BIAS_AVAILABLE and data.get("sens_val") is not None and data.get(
+                    "sens_train"
+                ) is not None:
+                    y_pred_val = tuned_model.predict(data["X_val"])
+                    y_prob_val = (
+                        tuned_model.predict_proba(data["X_val"])
+                        if hasattr(tuned_model, "predict_proba")
+                        else None
+                    )
+                    green_class_idx = int(data["label_encoder"].transform(["GREEN"])[0])
+                    tuned_model, bias_passed, fairness_metrics = detect_and_mitigate(
+                        tuned_model,
+                        data["X_train"],
+                        data["y_train"],
+                        data["X_val"],
+                        data["y_val"],
+                        y_pred_val,
+                        data["sens_train"],
+                        data["sens_val"],
+                        scenarios_raw=data.get("scenarios_val"),
+                        y_prob_val=y_prob_val,
+                        green_class_idx=green_class_idx,
+                    )
+                    mlflow.log_metric("bias_gate_passed", int(bias_passed))
+
+                signature = infer_signature(
+                    data["X_train"],
+                    predict_with_sensitive_features(
+                        tuned_model, data["X_train"], data["sens_train"]
+                    ),
+                )
                 log_model_to_mlflow(tuned_model, model_type, signature)
 
                 candidates.append({
@@ -313,8 +424,9 @@ def tune_candidate(candidates, data):
                     "model": tuned_model,
                     "run_id": mlflow.active_run().info.run_id,
                     "metrics": tuned_metrics,
-                    "bias_passed": True,  # Will be checked in select_best_model
+                    "bias_passed": bias_passed,
                     "tuning_study": tuning_study,
+                    "fairness_metrics": fairness_metrics if BIAS_AVAILABLE else {},
                 })
         except Exception as e:
             logger.error("Tuned model training failed: %s", e, exc_info=True)
@@ -392,10 +504,13 @@ def select_best_model(candidates):
 # 5. Final Evaluation on Held-Out Test Set
 # ---------------------------------------------------------------------------
 
-def final_evaluation(best, X_test, y_test, label_encoder):
+def final_evaluation(best, X_test, y_test, label_encoder, sens_test=None):
     """
     Run the best model on the held-out test set exactly once.
     Log final metrics and all visualizations to a dedicated MLflow run.
+
+    ``sens_test`` is required when ``best['model']`` is a Fairlearn
+    ThresholdOptimizer (post bias mitigation).
     """
     if best is None:
         logger.error("No best model — skipping final evaluation.")
@@ -412,6 +527,7 @@ def final_evaluation(best, X_test, y_test, label_encoder):
         metrics = evaluate_model(
             model, X_test, y_test,
             label_names=list(label_encoder.classes_),
+            sensitive_df=sens_test,
         )
 
         logger.info("Final test metrics: %s", metrics)
@@ -430,22 +546,138 @@ def final_evaluation(best, X_test, y_test, label_encoder):
 
     return metrics, final_run_id
 
-
+# ---------------------------------------------------------------------------
+# 5b. Save Best Model + Label Encoder Locally
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# 5b. Save Best Model + Label Encoder Locally
+# ---------------------------------------------------------------------------
 def save_best_model_local(best, label_encoder):
-    """Download champion model from MLflow to local artifacts and save label encoder."""
+    """Bundle champion model + feature pipeline + label encoder into a single MLflow pyfunc artifact at models/model/."""
     if not best: return
+    import shutil
+    from core_models.savvio_model_wrapper import SavVioModelWrapper
 
-    champion_model_uri = f"models:/{Config.REGISTERED_MODEL_NAME}@champion"
-    downloaded_model_path = mlflow.artifacts.download_artifacts(
-        artifact_uri=champion_model_uri,
-        dst_path=Config.MODEL_SAVE_DIR,
+    model_dir = os.path.join(Config.BASE_DIR, "models")
+    artifact_path = os.path.join(model_dir, "model")
+
+    # mlflow.pyfunc.save_model needs file paths on disk
+    joblib.dump(best["model"], os.path.join(model_dir, "classifier.pkl"))
+    joblib.dump(label_encoder, os.path.join(model_dir, "label_encoder.pkl"))
+
+    # mlflow errors if target dir exists — remove previous run's artifact
+    if os.path.exists(artifact_path):
+        shutil.rmtree(artifact_path)
+
+    mlflow.pyfunc.save_model(
+        path=artifact_path,
+        python_model=SavVioModelWrapper(),
+        artifacts={
+            "classifier": os.path.join(model_dir, "classifier.pkl"),
+            "feature_pipeline": os.path.join(Config.MODEL_SAVE_DIR, "feature_pipeline.pkl"),
+            "label_encoder": os.path.join(model_dir, "label_encoder.pkl"),
+        },
     )
-    joblib.dump(label_encoder, f"{Config.ENCODER_SAVE_DIR}/label_encoder.pkl")
-    logger.info("Saved champion model locally at %s and encoder at %s", downloaded_model_path, Config.ENCODER_SAVE_DIR)
+    logger.info("Saved bundled pyfunc artifact at %s", artifact_path)
+
+# ---------------------------------------------------------------------------
+# 6. LLM Layer Validation
+# ---------------------------------------------------------------------------
+
+def validate_llm_layer(best, data):
+    """
+    Smoke-test the LLM guardrail layer against the champion model.
+
+    Samples one prediction per class (GREEN/YELLOW/RED) from the validation set,
+    runs each through apply_llm_guardrails, and logs prompt versions + pass rate
+    to a dedicated MLflow run for lineage tracking.
+    """
+    if best is None:
+        logger.warning("LLM validation skipped — no champion model.")
+        return
+
+    model = best["model"]
+    label_encoder = data["label_encoder"]
+    X_val = data["X_val"]
+
+    # Sample one index per class from the validation set.
+    y_val_decoded = label_encoder.inverse_transform(data["y_val"])
+    sample_indices = []
+    for color in ["GREEN", "YELLOW", "RED"]:
+        matches = np.where(y_val_decoded == color)[0]
+        if len(matches) > 0:
+            sample_indices.append(int(matches[0]))
+
+    if not sample_indices:
+        logger.warning("LLM validation: no validation samples found.")
+        return
+
+    guardrail_results = []
+    with mlflow.start_run(run_name="llm_layer_validation"):
+        mlflow.log_param("llm_provider",              LLMConfig.PROVIDER)
+        mlflow.log_param("system_prompt_version",     LLMConfig.SYSTEM_PROMPT_VERSION)
+        mlflow.log_param("intent_prompt_version",     LLMConfig.INTENT_PROMPT_VERSION)
+        mlflow.log_param("response_prompt_version",   LLMConfig.RESPONSE_PROMPT_VERSION)
+        mlflow.log_param("champion_model",            best["name"])
+
+        for i in sample_indices:
+            try:
+                row = X_val[i:i+1] if not hasattr(X_val, "iloc") else X_val.iloc[i:i+1]
+                y_pred = label_encoder.inverse_transform([model.predict(row)[0]])[0]
+                proba = model.predict_proba(row)[0]
+                confidence = float(proba.max())
+
+                # Generic financial context — sufficient for a guardrail smoke test.
+                user_data = {
+                    "product_name": "Sample Product",
+                    "product_price": 299.99,
+                    "affordability_score": 0.0,
+                    "savings_to_price_ratio": 3.0,
+                    "emergency_fund_months": 4.0,
+                    "debt_to_income_ratio": 0.25,
+                    "triggered_rules": [],
+                    "was_downgraded": False,
+                }
+                is_safe, _ = apply_llm_guardrails(y_pred, user_data, confidence)
+                guardrail_results.append(int(is_safe))
+                logger.info("LLM validation sample — label=%s, guardrail_passed=%s", y_pred, is_safe)
+
+            except Exception as e:
+                logger.warning("LLM validation sample %d failed: %s", i, e)
+
+        if guardrail_results:
+            pass_rate = sum(guardrail_results) / len(guardrail_results)
+            mlflow.log_metric("guardrail_pass_rate", pass_rate)
+            mlflow.log_metric("guardrail_samples_tested", len(guardrail_results))
+            logger.info(
+                "LLM layer validation complete — pass_rate=%.2f (%d/%d samples)",
+                pass_rate, sum(guardrail_results), len(guardrail_results),
+            )
+
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
+def write_ci_metrics_files(final_metrics, best_candidate):
+    """Write metrics.txt and bias_metrics.txt for CI gate jobs."""
+    # metrics.txt — validation thresholds gate reads f1_score and roc_auc
+    with open("metrics.txt", "w") as f:
+        for key in ("f1_score", "roc_auc", "accuracy", "pr_auc"):
+            if key in (final_metrics or {}):
+                f.write(f"{key}={final_metrics[key]}\n")
+    logger.info("Wrote metrics.txt")
+
+    # bias_metrics.txt — CI gate reads bias_gate_passed (0 or 1).
+    # We use the bias_passed bool that detect_and_mitigate() already computed
+    # with category-aware thresholds (financial DPD is intentionally not checked,
+    # product DPD threshold is 0.30, etc.). Writing raw DPD/EOD values and applying
+    # a flat threshold in CI would incorrectly block on expected financial disparities.
+    bias_passed = int((best_candidate or {}).get("bias_passed", True))
+    with open("bias_metrics.txt", "w") as f:
+        f.write(f"bias_gate_passed={bias_passed}\n")
+    logger.info("Wrote bias_metrics.txt (bias_gate_passed=%d)", bias_passed)
+
 
 def main():
     print("Starting End-to-End ML Pipeline...\n")
@@ -470,7 +702,8 @@ def main():
     candidates = train_candidates(
         data["X_train"], data["y_train"],
         data["X_val"], data["y_val"],
-        data["sens_val"], data["label_encoder"],
+        data["sens_train"], data["sens_val"], data["label_encoder"],
+        data.get("scenarios_val"),
     )
     print(f"[3/6] Baseline training complete. candidates={len(candidates)}")
 
@@ -497,6 +730,7 @@ def main():
         data["X_test"],
         data["y_test"],
         data["label_encoder"],
+        sens_test=data.get("sens_test"),
     )
     if final_metrics is not None:
         print(f"[6/6] Final test metrics: {final_metrics}")
@@ -505,8 +739,17 @@ def main():
 
     sensitivity_summary = run_sensitivity_analysis(best, tuning_context)
 
+    # Write CI gate metric files (metrics.txt, bias_metrics.txt).
+    best_candidate = next((c for c in candidates if best and c["name"] == best["name"]), None)
+    write_ci_metrics_files(final_metrics, best_candidate)
+
     # 6. Save best model and label encoder locally under artifacts and preprocessing.
     save_best_model_local(best, data["label_encoder"])
+
+    # 6b. Validate LLM guardrail layer — smoke test + log prompt versions to MLflow.
+    print("[6b] Validating LLM guardrail layer...")
+    validate_llm_layer(best, data)
+    print("[6b] LLM layer validation complete.")
 
     # 7. Save a simple markdown summary for 3 baseline models + champion final metrics.
     summary_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -524,6 +767,30 @@ def main():
     if final_run_id and os.path.exists(report_path):
         with mlflow.start_run(run_id=final_run_id):
             mlflow.log_artifact(report_path, "reports")
+    # Generate bias analysis report
+    try:
+        from guards.bias_report import generate_bias_report
+        if best and final_metrics:
+            best_candidate = next(
+                (c for c in candidates if c["name"] == best["name"]), None
+            )
+            if best_candidate:
+                generate_bias_report(
+                    fairness_metrics=best_candidate.get("fairness_metrics", {}),
+                    model_name=best["name"],
+                    bias_passed=best_candidate.get("bias_passed", False),
+                    all_flags=best_candidate.get("bias_flags", []),
+                    mitigation_applied=bool(
+                        best_candidate.get("mitigation_applied", False)
+                    ),
+                    mitigation_successful=bool(
+                        best_candidate.get("mitigation_successful", False)
+                    ),
+                    final_metrics=final_metrics,
+                    output_dir=os.path.join(Config.BASE_DIR, "reports"),
+                )
+    except Exception as e:
+        logger.warning("Bias report generation failed: %s", e)
 
     # Summary.
     if best:

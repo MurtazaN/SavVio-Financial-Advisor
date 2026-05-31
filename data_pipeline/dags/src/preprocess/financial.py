@@ -190,18 +190,10 @@ def preprocess_financial_data(input_path: str, output_path: str) -> pd.DataFrame
 
     ensure_output_dir(output_path)
 
-    # --- Incremental merge: merge new output with existing preprocessed file ---
+    # Each run is independent — overwrite the output directly.
     temp_output = output_path + ".new.tmp"
     df.to_csv(temp_output, index=False)
-
-    if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-        from src.incremental import merge_csv
-        merge_stats = merge_csv(temp_output, output_path, key_cols=["user_id"])
-        os.remove(temp_output)
-        LOGGER.info("Incremental merge stats: %s", merge_stats)
-    else:
-        # First run — just rename temp to output.
-        os.replace(temp_output, output_path)
+    os.replace(temp_output, output_path)
 
     LOGGER.info("Saved preprocessed dataset to: %s", output_path)
     LOGGER.info("Final row count: %d", len(df))

@@ -1,0 +1,68 @@
+name: Terraform Infrastructure
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'deployment_pipeline/terraform/**'
+  push:
+    branches: [main]
+    paths:
+      - 'deployment_pipeline/terraform/**'
+
+# Only one Terraform run at a time to prevent state lock conflicts.
+# On PRs, cancel any in-progress plan for the same branch.
+# On main push, queue (don't cancel) so applies don't race.
+concurrency:
+  group: terraform-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  terraform-dev:
+    name: Terraform (dev)
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+
+    defaults:
+      run:
+        working-directory: deployment_pipeline/terraform/environments/dev
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up gcloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.14.7"
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Apply
+        run: |
+          terraform apply \
+            -var="project_id=${{ secrets.GCP_PROJECT_ID }}" \
+            -var-file="terraform.tfvars" \
+            -auto-approve
+
+      - name: Show Terraform Outputs
+        run: |
+          echo "=== Terraform Outputs ==="
+          echo "DB Connection Name: $(terraform output -raw db_connection_name)"
+          echo "API URL:            $(terraform output -raw api_url)"
+          echo "MLflow URL:         $(terraform output -raw mlflow_url)"
+          echo "VM IP:              $(terraform output -raw pipeline_vm_ip)"
+          echo ""

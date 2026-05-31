@@ -35,9 +35,9 @@ def small_dataset():
 @pytest.fixture
 def candidates():
     return [
-        {"name": "xgboost",   "metrics": {"f1_score": 0.72}, "bias_passed": True},
-        {"name": "lightgbm",  "metrics": {"f1_score": 0.68}, "bias_passed": True},
-        {"name": "xgb_linear","metrics": {"f1_score": 0.65}, "bias_passed": False},
+        {"name": "xgboost",    "metrics": {"f1_score": 0.72}, "bias_passed": True},
+        {"name": "lightgbm",   "metrics": {"f1_score": 0.68}, "bias_passed": True},
+        {"name": "xgb_linear", "metrics": {"f1_score": 0.65}, "bias_passed": False},
     ]
 
 
@@ -58,8 +58,8 @@ def mock_study():
 class TestObjectivesRegistry:
 
     def test_all_three_model_types_registered(self):
-        assert "xgboost"   in _OBJECTIVES
-        assert "lightgbm"  in _OBJECTIVES
+        assert "xgboost"    in _OBJECTIVES
+        assert "lightgbm"   in _OBJECTIVES
         assert "xgb_linear" in _OBJECTIVES
 
     def test_all_values_are_callable(self):
@@ -68,7 +68,7 @@ class TestObjectivesRegistry:
 
 
 # ---------------------------------------------------------------------------
-# tune_model
+# tune_model — now returns (params, score, study)
 # ---------------------------------------------------------------------------
 
 class TestTuneModel:
@@ -83,7 +83,7 @@ class TestTuneModel:
         mock_mlflow.start_run.return_value.__exit__ = MagicMock(return_value=False)
 
         X_tr, y_tr, X_val, y_val = small_dataset
-        params, score = tune_model("xgboost", X_tr, y_tr, X_val, y_val, n_trials=2, timeout=10)
+        params, score, study = tune_model("xgboost", X_tr, y_tr, X_val, y_val, n_trials=2, timeout=10)
 
         assert isinstance(params, dict)
         assert isinstance(score, float)
@@ -98,7 +98,7 @@ class TestTuneModel:
         mock_mlflow.start_run.return_value.__exit__ = MagicMock(return_value=False)
 
         X_tr, y_tr, X_val, y_val = small_dataset
-        params, score = tune_model("xgboost", X_tr, y_tr, X_val, y_val, n_trials=2, timeout=10)
+        params, score, study = tune_model("xgboost", X_tr, y_tr, X_val, y_val, n_trials=2, timeout=10)
 
         assert params == mock_study.best_params
         assert score == mock_study.best_value
@@ -114,7 +114,7 @@ class TestTuneModel:
 
     @patch("core_models.optuna_tuner.mlflow")
     @patch("core_models.optuna_tuner.optuna.create_study")
-    def test_study_created_with_tpe_sampler(
+    def test_study_created_with_maximize_direction(
         self, mock_create_study, mock_mlflow, small_dataset, mock_study
     ):
         mock_create_study.return_value = mock_study
@@ -152,12 +152,12 @@ class TestTuneModel:
 
         X_tr, y_tr, X_val, y_val = small_dataset
         for model_type in ("xgboost", "lightgbm", "xgb_linear"):
-            params, score = tune_model(model_type, X_tr, y_tr, X_val, y_val, n_trials=1, timeout=5)
+            params, score, study = tune_model(model_type, X_tr, y_tr, X_val, y_val, n_trials=1, timeout=5)
             assert isinstance(params, dict)
 
 
 # ---------------------------------------------------------------------------
-# tune_best_candidate
+# tune_best_candidate — now returns (model_type, params, score, study)
 # ---------------------------------------------------------------------------
 
 class TestTuneBestCandidate:
@@ -190,12 +190,11 @@ class TestTuneBestCandidate:
         self, mock_config, mock_tune_model, small_dataset, candidates
     ):
         mock_config.TUNING_BACKEND = "optuna"
-        mock_tune_model.return_value = ({"max_depth": 4}, 0.80)
+        mock_tune_model.return_value = ({"max_depth": 4}, 0.80, MagicMock())
 
         X_tr, y_tr, X_val, y_val = small_dataset
         tune_best_candidate(candidates, X_tr, y_tr, X_val, y_val)
 
-        # xgboost has highest f1_score (0.72) among tunable candidates
         args = mock_tune_model.call_args[0]
         assert args[0] == "xgboost"
 
@@ -205,13 +204,13 @@ class TestTuneBestCandidate:
         self, mock_config, mock_tune_model, small_dataset, candidates
     ):
         mock_config.TUNING_BACKEND = "optuna"
-        mock_tune_model.return_value = ({"max_depth": 4}, 0.80)
+        mock_tune_model.return_value = ({"max_depth": 4}, 0.80, MagicMock())
 
         X_tr, y_tr, X_val, y_val = small_dataset
         result = tune_best_candidate(candidates, X_tr, y_tr, X_val, y_val)
 
         assert result is not None
-        model_type, params, score = result
+        model_type, params, score, study = result
         assert model_type == "xgboost"
         assert params == {"max_depth": 4}
         assert score == 0.80
@@ -222,7 +221,7 @@ class TestTuneBestCandidate:
         self, mock_config, mock_tune_model, small_dataset
     ):
         mock_config.TUNING_BACKEND = "optuna"
-        mock_tune_model.return_value = ({"max_depth": 3}, 0.75)
+        mock_tune_model.return_value = ({"max_depth": 3}, 0.75, MagicMock())
 
         mixed = [
             {"name": "random_forest", "metrics": {"f1_score": 0.90}, "bias_passed": True},
@@ -232,5 +231,5 @@ class TestTuneBestCandidate:
         result = tune_best_candidate(mixed, X_tr, y_tr, X_val, y_val)
 
         # random_forest is not tunable so xgboost should be picked
-        model_type, _, _ = result
+        model_type, _, _, _ = result
         assert model_type == "xgboost"

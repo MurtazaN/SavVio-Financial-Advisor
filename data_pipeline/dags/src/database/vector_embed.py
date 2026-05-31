@@ -21,10 +21,6 @@ from sqlalchemy import text
 
 from savviocore.database.db_connection import get_engine, ensure_pgvector
 from savviocore.database.db_schema import create_tables
-# free. No API keys, no billing, no rate limits
-from sentence_transformers import SentenceTransformer
-
-
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -47,7 +43,7 @@ BATCH_SIZE = 64
 
 def load_model():
     """Load the sentence-transformer model once."""
-    # from sentence_transformers import SentenceTransformer
+    from sentence_transformers import SentenceTransformer
     logger.info("Loading embedding model: %s", EMBEDDING_MODEL)
     return SentenceTransformer(EMBEDDING_MODEL)
 
@@ -183,9 +179,14 @@ def store_product_embeddings(engine, product_ids: list[str], embeddings: np.ndar
         VALUES (:pid, CAST(:emb AS vector))
         ON CONFLICT (product_id) DO UPDATE SET embedding = EXCLUDED.embedding
     """)
+    records = [
+        {"pid": str(pid), "emb": str(emb.tolist())}
+        for pid, emb in zip(product_ids, embeddings)
+    ]
+    insert_size = 500
     with engine.begin() as conn:
-        for pid, emb in zip(product_ids, embeddings):
-            conn.execute(sql, {"pid": str(pid), "emb": str(emb.tolist())})
+        for start in range(0, len(records), insert_size):
+            conn.execute(sql, records[start : start + insert_size])
     logger.info("Product embeddings stored")
 
 
@@ -197,13 +198,14 @@ def store_review_embeddings(engine, product_ids: list[str], user_ids: list[str],
         VALUES (:pid, :uid, CAST(:emb AS vector))
         ON CONFLICT (product_id, user_id) DO UPDATE SET embedding = EXCLUDED.embedding
     """)
+    records = [
+        {"pid": str(pid), "uid": str(uid), "emb": str(emb.tolist())}
+        for pid, uid, emb in zip(product_ids, user_ids, embeddings)
+    ]
+    insert_size = 500
     with engine.begin() as conn:
-        for pid, uid, emb in zip(product_ids, user_ids, embeddings):
-            conn.execute(sql, {
-                "pid": str(pid),
-                "uid": str(uid),
-                "emb": str(emb.tolist()),
-            })
+        for start in range(0, len(records), insert_size):
+            conn.execute(sql, records[start : start + insert_size])
     logger.info("Review embeddings stored")
 
 
@@ -219,7 +221,14 @@ def embed_products(engine, products_path: str, model):
     if "product_id" not in df.columns:
         raise ValueError("Products file must contain a 'product_id' column")
 
-    df["_embed_text"] = df.apply(build_product_text, axis=1)
+    text_cols = [c for c in ["product_name", "category", "description", "features"] if c in df.columns]
+    df["_embed_text"] = df[text_cols].fillna("").astype(str).apply(
+        lambda row: " | ".join(v.strip() for v in row if v.strip()), axis=1
+    )
+    if "details" in df.columns:
+        df["_embed_text"] += df["details"].apply(
+            lambda v: (" | " + _flatten_details(v)) if v else ""
+        )
     df = df[df["_embed_text"].str.strip().astype(bool)].reset_index(drop=True)
     logger.info("Products with non-empty embedding text: %d", len(df))
 
@@ -253,7 +262,10 @@ def embed_reviews(engine, reviews_path: str, model):
         if col not in df.columns:
             raise ValueError(f"Reviews file must contain a '{col}' column")
 
-    df["_embed_text"] = df.apply(build_review_text, axis=1)
+    text_cols = [c for c in ["review_title", "review_text"] if c in df.columns]
+    df["_embed_text"] = df[text_cols].fillna("").astype(str).apply(
+        lambda row: " | ".join(v.strip() for v in row if v.strip()), axis=1
+    )
 
     # Only embed reviews that have actual text
     df = df[df["_embed_text"].str.strip().astype(bool)].reset_index(drop=True)

@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <defs>
+    <linearGradient id="topF" gradientUnits="userSpaceOnUse" x1="24" y1="4" x2="8" y2="17">
+      <stop offset="0%" stop-color="#6ee7b7"/>
+      <stop offset="100%" stop-color="#10b981"/>
+    </linearGradient>
+    <linearGradient id="botF" gradientUnits="userSpaceOnUse" x1="8" y1="17" x2="24" y2="28">
+      <stop offset="0%" stop-color="#10b981"/>
+      <stop offset="100%" stop-color="#064e3b"/>
+    </linearGradient>
+  </defs>
+  <!-- Depth shadow -->
+  <path d="M 24,11 C 24,7 21,4 16,4 C 11,4 8,7 8,11 C 8,15 12,17 16,18"
+    fill="none" stroke="#064e3b" stroke-width="5" stroke-linecap="round"
+    transform="translate(1,1)"/>
+  <path d="M 16,18 C 20,19 24,21 24,25 C 24,28 21,28 16,28 C 11,28 8,26 8,23"
+    fill="none" stroke="#022c22" stroke-width="5" stroke-linecap="round"
+    transform="translate(1,1)"/>
+  <!-- Main S -->
+  <path d="M 24,11 C 24,7 21,4 16,4 C 11,4 8,7 8,11 C 8,15 12,17 16,18"
+    fill="none" stroke="url(#topF)" stroke-width="5" stroke-linecap="round"/>
+  <path d="M 16,18 C 20,19 24,21 24,25 C 24,28 21,28 16,28 C 11,28 8,26 8,23"
+    fill="none" stroke="url(#botF)" stroke-width="5" stroke-linecap="round"/>
+</svg>

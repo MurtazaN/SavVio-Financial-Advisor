@@ -1,0 +1,10 @@
+project_id  = "savvio-purchase-guardrail"
+region      = "us-east1"
+zone        = "us-east1-b"
+environment = "dev"
+db_tier     = "db-f1-micro"
+
+# Placeholder images — CI/CD overrides these via: terraform apply -var="api_image=..."
+api_image      = "gcr.io/cloudrun/placeholder"
+frontend_image = "gcr.io/cloudrun/placeholder"
+mlflow_image   = "gcr.io/cloudrun/placeholder"

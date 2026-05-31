@@ -4,9 +4,10 @@ import sys
 from pathlib import Path
 from src.ingestion.run_ingestion import ingest_financial_task, ingest_product_task, ingest_review_task
 from src.preprocess.run_preprocessing import preprocess_financial_task, preprocess_product_task, preprocess_review_task
-from src.features.run_features import feature_financial_task, feature_review_task
-from src.database.run_database import setup_database_task, load_financial_task, load_products_task, load_reviews_task, generate_and_load_embedding_task
+from src.features.run_features import feature_financial_task, feature_product_review_task
+from src.database.run_database import setup_database_task, load_financial_task, load_products_task, load_reviews_task
 from src.validation.run_validation import validate_raw, validate_processed, validate_features, validate_raw_anomalies
+from src.bias.run_bias import bias_financial_task, bias_product_task, bias_review_task
 
 from datetime import datetime, timedelta
 from airflow import DAG
@@ -101,7 +102,7 @@ dag = DAG(
     dag_id="Data_pipeline_airflow",
     default_args=default_args,
     description="Data Pipeline Airflow DAG",
-    schedule="@daily",
+    schedule="@monthly",
     catchup=False,
     tags=["example"],
     owner_links={"Murtaza Nipplewala": "https://github.com/MurtazaNipplewala/SavVio"},
@@ -264,8 +265,40 @@ email_pipeline_success = EmailOperator(
     task_id="send_email_pipeline_success",
     to=ALERT_EMAIL,
     cc="nirajmehta960@gmail.com",
-    subject="SavVio Data Pipeline Airflow - Pipeline Completed Successfully",
-    html_content="<p>All data has been successfully ingested, validated, processed, featured, and loaded into the database.</p>",
+    subject="SavVio Data Pipeline — Run Completed Successfully",
+    html_content="""
+<html>
+<body style="font-family: Arial, sans-serif; color: #333; max-width: 600px; margin: auto; padding: 24px;">
+  <h2 style="color: #2e7d32;">SavVio Data Pipeline Completed Successfully</h2>
+  <p>The daily data pipeline has finished all stages without errors.</p>
+
+  <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+    <thead>
+      <tr style="background-color: #f5f5f5;">
+        <th style="text-align: left; padding: 8px 12px; border-bottom: 2px solid #ddd;">Stage</th>
+        <th style="text-align: left; padding: 8px 12px; border-bottom: 2px solid #ddd;">Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td style="padding: 8px 12px; border-bottom: 1px solid #eee;">Data Ingestion</td><td style="padding: 8px 12px; border-bottom: 1px solid #eee; color: #2e7d32;">[SUCCESS] Success</td></tr>
+      <tr><td style="padding: 8px 12px; border-bottom: 1px solid #eee;">Raw Data Validation</td><td style="padding: 8px 12px; border-bottom: 1px solid #eee; color: #2e7d32;">[SUCCESS] Success</td></tr>
+      <tr><td style="padding: 8px 12px; border-bottom: 1px solid #eee;">Data Preprocessing</td><td style="padding: 8px 12px; border-bottom: 1px solid #eee; color: #2e7d32;">[SUCCESS] Success</td></tr>
+      <tr><td style="padding: 8px 12px; border-bottom: 1px solid #eee;">Processed Data Validation</td><td style="padding: 8px 12px; border-bottom: 1px solid #eee; color: #2e7d32;">[SUCCESS] Success</td></tr>
+      <tr><td style="padding: 8px 12px; border-bottom: 1px solid #eee;">Feature Engineering</td><td style="padding: 8px 12px; border-bottom: 1px solid #eee; color: #2e7d32;">[SUCCESS] Success</td></tr>
+      <tr><td style="padding: 8px 12px; border-bottom: 1px solid #eee;">Featured Data Validation</td><td style="padding: 8px 12px; border-bottom: 1px solid #eee; color: #2e7d32;">[SUCCESS] Success</td></tr>
+      <tr><td style="padding: 8px 12px; border-bottom: 1px solid #eee;">Database Loading</td><td style="padding: 8px 12px; border-bottom: 1px solid #eee; color: #2e7d32;">[SUCCESS] Success</td></tr>
+      <tr><td style="padding: 8px 12px;">Bias Analysis</td><td style="padding: 8px 12px; color: #2e7d32;">[SUCCESS] Success</td></tr>
+    </tbody>
+  </table>
+
+  <p style="margin-top: 20px;">All financial profiles, products, and reviews have been ingested, validated, processed, featured, and loaded into the PostgreSQL database.</p>
+
+  <p style="color: #888; font-size: 12px; margin-top: 32px; border-top: 1px solid #eee; padding-top: 12px;">
+    SavVio Data Pipeline &nbsp;|&nbsp; Airflow Scheduler &nbsp;|&nbsp; This is an automated notification.
+  </p>
+</body>
+</html>
+""",
     dag=dag,
 )
 
@@ -413,7 +446,7 @@ check_processed_validation = BranchPythonOperator(
     task_id='check_processed_validation',
     python_callable=make_branch_check(
         upstream_ids=['validate_processed_data'],
-        success_ids=['feature_financial_data', 'feature_review_data'],
+        success_ids=['feature_financial_data', 'feature_product_review_data'],
         # failure_ids=['send_email_at_processed_validation_error', 'send_slack_at_processed_validation_error'],
         failure_ids=['send_email_at_processed_validation_error'],
     ),
@@ -436,19 +469,19 @@ feature_financial = PythonOperator(
     dag=dag,
 )
 
-feature_reviews = PythonOperator(
-    task_id='feature_review_data',
-    python_callable=feature_review_task,
+feature_product_reviews = PythonOperator(
+    task_id='feature_product_review_data',
+    python_callable=feature_product_review_task,
     dag=dag,
 )
 
-check_processed_validation >> [feature_financial, feature_reviews]
+check_processed_validation >> [feature_financial, feature_product_reviews]
 
 # --- BRANCH: all feature engineering succeeded? ---
 check_feature_engineering = BranchPythonOperator(
     task_id='check_feature_engineering',
     python_callable=make_branch_check(
-        upstream_ids=['feature_financial_data', 'feature_review_data'],
+        upstream_ids=['feature_financial_data', 'feature_product_review_data'],
         success_ids=['validate_featured_data'],
         # failure_ids=['send_email_at_feature_engineering_error', 'send_slack_at_feature_engineering_error'],
         failure_ids=['send_email_at_feature_engineering_error'],
@@ -457,7 +490,7 @@ check_feature_engineering = BranchPythonOperator(
     dag=dag,
 )
 
-[feature_financial, feature_reviews] >> check_feature_engineering
+[feature_financial, feature_product_reviews] >> check_feature_engineering
 # check_feature_engineering >> [email_error_at_feature_engineering, slack_error_at_feature_engineering]
 check_feature_engineering >> email_error_at_feature_engineering
 
@@ -520,20 +553,20 @@ load_review = PythonOperator(
     dag=dag,
 )
 
-generate_load_embeddings = PythonOperator(
-    task_id='generate_load_embeddings',
-    python_callable=generate_and_load_embedding_task,
-    dag=dag,
-)
+# generate_load_embeddings = PythonOperator(
+#     task_id='generate_load_embeddings',
+#     python_callable=generate_and_load_embedding_task,
+#     dag=dag,
+# )
 
 check_featured_validation >> setup_database
-setup_database >> [load_financial, load_product] >> load_review >> generate_load_embeddings
+setup_database >> [load_financial, load_product] >> load_review
 
 # --- BRANCH: all DB loading succeeded? ---
 check_db_loading = BranchPythonOperator(
     task_id='check_db_loading',
     python_callable=make_branch_check(
-        upstream_ids=['load_financial_profiles', 'load_products', 'load_reviews', 'generate_load_embeddings'],
+        upstream_ids=['load_financial_profiles', 'load_products', 'load_reviews'],
         # success_ids=['send_email_pipeline_success', 'send_slack_pipeline_success'],
         success_ids=['send_email_pipeline_success'],
         # failure_ids=['send_email_at_DB_loading_error', 'send_slack_at_DB_loading_error'],
@@ -543,7 +576,6 @@ check_db_loading = BranchPythonOperator(
     dag=dag,
 )
 
-generate_load_embeddings >> check_db_loading
 # check_db_loading >> [email_error_at_DB_loading, slack_error_at_DB_loading]
 check_db_loading >> email_error_at_DB_loading
 # check_db_loading >> [email_pipeline_success, slack_pipeline_success]
@@ -556,10 +588,10 @@ def _check_pipeline_complete(**context):
     """Fail the DAG run if the success email was not sent (i.e. pipeline didn't fully complete)."""
     import logging
     from airflow.sdk.execution_time.task_runner import RuntimeTaskInstance
-    
+
     logger = logging.getLogger(__name__)
     dag_run = context['dag_run']
-    
+
     try:
         # Airflow 3 SDK uses get_task_states instead of context['dag_run'].get_task_instance
         all_states = RuntimeTaskInstance.get_task_states(
@@ -571,9 +603,9 @@ def _check_pipeline_complete(**context):
     except Exception as e:
         logger.error("get_task_states failed: %s", e, exc_info=True)
         raise AirflowException(f"Failed to query task states: {e}")
-        
+
     state = str(states.get('send_email_pipeline_success', 'missing'))
-    
+
     # Handle string 'success' or TaskInstanceState enum strings
     if state not in ('success', 'TaskInstanceState.SUCCESS') and 'success' not in state.lower():
         raise AirflowException(
@@ -592,20 +624,33 @@ email_pipeline_success >> pipeline_sentinel
 
 
 # ═══════════════════════════════════════════════════════════════════
-# Airflow DAG for Bias Analysis (commented out)
+# 8. BIAS ANALYSIS  (runs after DB loading, before check_db_loading)
+#
+# These tasks analyze representation bias, missingness bias, and
+# cross-column checks on processed/featured data. Output is logs only —
+# no files written, no DB writes. Failures here do NOT block the
+# success email (check_db_loading only checks load task states).
 # ═══════════════════════════════════════════════════════════════════
 
-# bias_financial = PythonOperator(
-#     task_id='bias_analysis_financial',
-#     python_callable=bias.analyze_financial_bias,
-#     dag=dag
-# )
+bias_financial = PythonOperator(
+    task_id='bias_analysis_financial',
+    python_callable=bias_financial_task,
+    dag=dag,
+)
 
-# bias_products = PythonOperator(
-#     task_id='bias_analysis_products',
-#     python_callable=bias.analyze_product_bias,
-#     dag=dag
-# )
+bias_products = PythonOperator(
+    task_id='bias_analysis_products',
+    python_callable=bias_product_task,
+    dag=dag,
+)
 
-# # Run in parallel since they analyze independent tracks.
-# [bias_financial, bias_products] >> complete
+bias_reviews = PythonOperator(
+    task_id='bias_analysis_reviews',
+    python_callable=bias_review_task,
+    dag=dag,
+)
+
+# Run bias in parallel after load_review, then feed into check_db_loading.
+# This ensures send_email_pipeline_success only triggers after all bias
+# tasks complete, while bias failures still don't block the success email.
+load_review >> [bias_financial, bias_products, bias_reviews] >> check_db_loading

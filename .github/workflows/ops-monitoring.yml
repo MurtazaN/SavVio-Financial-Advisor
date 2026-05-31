@@ -1,0 +1,167 @@
+name: Ops Checks & Monitoring Sync
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "deployment_pipeline/monitoring/**"
+  workflow_dispatch:
+    inputs:
+      run_monitoring_sync:
+        description: "Also deploy monitoring stack"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+  schedule:
+    - cron: "0 8 * * 1"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ENVIRONMENT: dev
+  REGION: us-east1
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+
+jobs:
+  drift-detection:
+    name: Drift Detection
+    runs-on: ubuntu-latest
+    if: github.event_name != 'push'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-drift-evidently-0.7.20
+          restore-keys: |
+            ${{ runner.os }}-pip-drift-
+
+      - name: Install dependencies
+        run: |
+          pip install evidently==0.7.20 pandas numpy scikit-learn pyyaml python-dotenv requests
+          pip install sqlalchemy psycopg2-binary
+          pip install -e savviocore
+
+      - name: Cache Cloud SQL Auth Proxy
+        id: cache-proxy
+        uses: actions/cache@v4
+        with:
+          path: cloud-sql-proxy
+          key: cloud-sql-proxy-v2.14.1-linux-amd64
+
+      - name: Download Cloud SQL Auth Proxy
+        if: steps.cache-proxy.outputs.cache-hit != 'true'
+        run: |
+          curl -so cloud-sql-proxy https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.14.1/cloud-sql-proxy.linux.amd64
+          chmod +x cloud-sql-proxy
+
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up gcloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Start Cloud SQL Auth Proxy
+        run: |
+          chmod +x cloud-sql-proxy
+          ./cloud-sql-proxy "${{ secrets.DB_INSTANCE_CONNECTION_NAME }}" --port 5432 &
+          sleep 3
+
+      - name: Run drift detector
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          DB_HOST: ${{ secrets.DB_HOST }}
+          DB_PORT: ${{ secrets.DB_PORT }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          PYTHONPATH: "${{ github.workspace }}/deployment_pipeline/monitoring/drift:${{ github.workspace }}/savviocore/src:${{ github.workspace }}"
+        run: |
+          python deployment_pipeline/monitoring/drift/drift_detector.py
+
+      - name: Upload drift report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: drift-report-${{ github.run_id }}
+          path: deployment_pipeline/monitoring/reports/
+          retention-days: 30
+
+  deploy-monitoring:
+    name: Deploy Monitoring
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_monitoring_sync == 'true')
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up gcloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Get API host for Prometheus scrape target
+        id: api
+        run: |
+          API_URL=$(gcloud run services describe savvio-backend-api \
+            --region ${{ env.REGION }} --format='value(status.url)')
+          echo "host=$(echo $API_URL | sed 's|https://||')" >> $GITHUB_OUTPUT
+
+      - name: Render Prometheus production config
+        env:
+          API_HOST: ${{ steps.api.outputs.host }}
+          GRAFANA_REMOTE_WRITE_URL: ${{ secrets.GRAFANA_REMOTE_WRITE_URL }}
+          GRAFANA_CLOUD_USERNAME: ${{ secrets.GRAFANA_CLOUD_USERNAME }}
+          GRAFANA_CLOUD_API_KEY: ${{ secrets.GRAFANA_CLOUD_API_KEY }}
+        run: |
+          mkdir -p monitoring
+          envsubst < deployment_pipeline/monitoring/prometheus/prometheus.production.yml \
+            > monitoring/prometheus.yml
+
+      - name: Copy Prometheus config to VM
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.GCE_VM_IP }}
+          username: github-actions
+          key: ${{ secrets.GCE_SSH_PRIVATE_KEY }}
+          source: "monitoring/prometheus.yml"
+          target: "/home/github-actions/savvio-monitoring/prometheus/"
+          strip_components: 1
+
+      - name: Copy docker-compose to VM
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.GCE_VM_IP }}
+          username: github-actions
+          key: ${{ secrets.GCE_SSH_PRIVATE_KEY }}
+          source: "deployment_pipeline/monitoring/docker-compose.production.yml"
+          target: "/home/github-actions/savvio-monitoring/"
+          strip_components: 2
+
+      - name: Deploy Prometheus on VM
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.GCE_VM_IP }}
+          username: github-actions
+          key: ${{ secrets.GCE_SSH_PRIVATE_KEY }}
+          timeout: 60s
+          command_timeout: 10m
+          script: |
+            cd /home/github-actions/savvio-monitoring
+            docker compose -f docker-compose.production.yml pull
+            docker compose -f docker-compose.production.yml up -d --remove-orphans

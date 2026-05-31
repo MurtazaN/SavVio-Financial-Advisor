@@ -137,7 +137,7 @@ Establish the foundational project structure, dependencies, and development envi
    ├── data_pipeline/
    │   ├── README.md              # This file
    │   ├── SETUP_AND_RUN.md       # Setup and run instructions (reproducibility)
-   │   ├── data-requirements.txt  # Python dependencies (or use repo root requirements.txt)
+   │   ├── requirements.txt       # Python dependencies (or use repo root requirements.txt)
    │   ├── config/                # Configuration (Airflow, Token, GCP)
    │   ├── logs/                  # Pipeline execution logs
    │   ├── tests/                 # Unit tests (pytest)

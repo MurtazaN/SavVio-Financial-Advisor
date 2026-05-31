@@ -5,6 +5,9 @@ Centralized settings for the ML training pipeline — paths, MLflow,
 feature lists, and scenario generation. All constants used by
 engineering.py and run_pipeline.py live here.
 
+Local dev:  set MLFLOW_TRACKING_URI in model_pipeline/.env
+            (default: http://mlflow-server:5000 for docker-compose)
+CI/prod:    MLFLOW_TRACKING_URI is injected by the workflow from Cloud Run.
 """
 
 import os
@@ -25,10 +28,10 @@ class Config:
     MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow-server:5000")
     EXPERIMENT_NAME = "SavVio_Prediction"
 
-    # GCP (Production)
-    GCP_PROJECT_ID = os.getenv("GCP_PROJECT_ID", "savvio-purchase-guardrail")
+    # GCP — no hardcoded defaults; must be set via env var or CI secret
+    GCP_PROJECT_ID = os.getenv("GCP_PROJECT_ID")
     GCP_REGION = os.getenv("GCP_REGION", "us-east1")
-    ARTIFACT_REGISTRY_REPO = "savvio-model-repo"
+    ARTIFACT_REGISTRY_REPO = os.getenv("ARTIFACT_REGISTRY_REPO", "savvio-model-repo")
     # ---------------------------------------------------------------------------
     # Feature Lists (used by engineering.py for imputation, scaling, encoding)
     # ---------------------------------------------------------------------------
@@ -84,6 +87,7 @@ class Config:
 
     # ---------------------------------------------------------------------------
     # Sensitive Features for Bias Tracking (Fairlearn)
+    # ``savings_band`` is appended in run_pipeline.prepare_data from scenarios.
     # ---------------------------------------------------------------------------
     SENSITIVE_FEATURES = ["region", "employment_status"]
 

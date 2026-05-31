@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+  <defs>
+    <!-- Upper bowl gradient: mint/emerald-300 → teal primary -->
+    <linearGradient id="topGrad" gradientUnits="userSpaceOnUse" x1="148" y1="26" x2="52" y2="110">
+      <stop offset="0%" stop-color="#6ee7b7"/>
+      <stop offset="100%" stop-color="#10b981"/>
+    </linearGradient>
+    <!-- Lower bowl gradient: teal primary → deep emerald -->
+    <linearGradient id="botGrad" gradientUnits="userSpaceOnUse" x1="52" y1="110" x2="148" y2="175">
+      <stop offset="0%" stop-color="#10b981"/>
+      <stop offset="100%" stop-color="#064e3b"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Depth layer (back shadow) — upper bowl -->
+  <path
+    d="M 148,65
+       C 148,42 128,26 100,26
+       C 72,26  52,42  52,65
+       C 52,88  76,104 100,110"
+    fill="none"
+    stroke="#064e3b"
+    stroke-width="30"
+    stroke-linecap="round"
+    transform="translate(6,6)"
+  />
+
+  <!-- Depth layer (back shadow) — lower bowl -->
+  <path
+    d="M 100,110
+       C 124,116 148,132 148,155
+       C 148,174 128,175 100,175
+       C 72,175  52,163  52,148"
+    fill="none"
+    stroke="#022c22"
+    stroke-width="30"
+    stroke-linecap="round"
+    transform="translate(6,6)"
+  />
+
+  <!-- Main S — upper bowl (light mint → teal) -->
+  <path
+    d="M 148,65
+       C 148,42 128,26 100,26
+       C 72,26  52,42  52,65
+       C 52,88  76,104 100,110"
+    fill="none"
+    stroke="url(#topGrad)"
+    stroke-width="30"
+    stroke-linecap="round"
+  />
+
+  <!-- Main S — lower bowl (teal → deep emerald) -->
+  <path
+    d="M 100,110
+       C 124,116 148,132 148,155
+       C 148,174 128,175 100,175
+       C 72,175  52,163  52,148"
+    fill="none"
+    stroke="url(#botGrad)"
+    stroke-width="30"
+    stroke-linecap="round"
+  />
+</svg>

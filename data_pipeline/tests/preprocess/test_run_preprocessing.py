@@ -22,18 +22,28 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 # Stub preprocess sub-modules BEFORE loading run_preprocessing
 # ---------------------------------------------------------------------------
 def _stub_preprocess():
-    for name in ("preprocess", "preprocess.financial", "preprocess.product", "preprocess.review"):
+    for name in (
+        "preprocess", "preprocess.financial", "preprocess.product", "preprocess.review",
+        "src", "src.preprocess", "src.preprocess.financial", "src.preprocess.product", "src.preprocess.review",
+        "src.utils",
+    ):
         if name not in sys.modules:
             sys.modules[name] = types.ModuleType(name)
 
-    sys.modules["preprocess.financial"].main = MagicMock()
-    sys.modules["preprocess.product"].main  = MagicMock()
-    sys.modules["preprocess.review"].main   = MagicMock()
+    for mod_name in ("preprocess.financial", "src.preprocess.financial"):
+        sys.modules[mod_name].main = MagicMock()
+    for mod_name in ("preprocess.product", "src.preprocess.product"):
+        sys.modules[mod_name].main = MagicMock()
+    for mod_name in ("preprocess.review", "src.preprocess.review"):
+        sys.modules[mod_name].main = MagicMock()
 
     # Make attributes accessible via the parent module
-    sys.modules["preprocess"].financial = sys.modules["preprocess.financial"]
-    sys.modules["preprocess"].product   = sys.modules["preprocess.product"]
-    sys.modules["preprocess"].review    = sys.modules["preprocess.review"]
+    for parent in ("preprocess", "src.preprocess"):
+        sys.modules[parent].financial = sys.modules[f"{parent}.financial"]
+        sys.modules[parent].product   = sys.modules[f"{parent}.product"]
+        sys.modules[parent].review    = sys.modules[f"{parent}.review"]
+
+    sys.modules["src.utils"].setup_logging = lambda *a, **kw: None
 
 _stub_preprocess()
 
@@ -58,9 +68,9 @@ def _load():
 M = _load()
 
 # Shortcuts to the stubbed main() functions
-_fin  = sys.modules["preprocess.financial"]
-_prod = sys.modules["preprocess.product"]
-_rev  = sys.modules["preprocess.review"]
+_fin  = sys.modules["src.preprocess.financial"]
+_prod = sys.modules["src.preprocess.product"]
+_rev  = sys.modules["src.preprocess.review"]
 
 
 # ---------------------------------------------------------------------------
@@ -95,7 +105,6 @@ def test_run_pipeline_calls_in_order():
     M.run_pipeline()
     assert call_order == ["financial", "product", "review"]
 
-    # restore
     _fin.main.side_effect  = None
     _prod.main.side_effect = None
     _rev.main.side_effect  = None

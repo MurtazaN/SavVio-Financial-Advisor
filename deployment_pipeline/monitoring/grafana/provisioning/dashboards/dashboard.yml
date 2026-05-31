@@ -1,0 +1,18 @@
+# =============================================================================
+# Grafana Dashboard Auto-Provisioning
+# =============================================================================
+# Tells Grafana to load dashboard JSON files from the dashboards directory.
+# =============================================================================
+
+apiVersion: 1
+
+providers:
+  - name: "SavVio"
+    orgId: 1
+    folder: "SavVio"
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: false

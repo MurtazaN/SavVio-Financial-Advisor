@@ -24,9 +24,21 @@ _utils = sys.modules.get("utils", types.ModuleType("utils"))
 _utils.setup_logging = lambda *a, **kw: None
 sys.modules["utils"] = _utils
 
+# Stub src.utils as well
+_src_utils = types.ModuleType("src.utils")
+_src_utils.setup_logging = lambda *a, **kw: None
+sys.modules["src.utils"] = _src_utils
+
+_run_fin_mock = MagicMock()
+_run_rev_mock = MagicMock()
+
 for _name, _attrs in {
-    "financial_features": {"run_financial_features": MagicMock()},
-    "product_review_features": {"run_review_features": MagicMock()},
+    "financial_features":           {"run_financial_features": _run_fin_mock},
+    "product_review_features":      {"run_review_features": _run_rev_mock},
+    "src.features.financial_features":      {"run_financial_features": _run_fin_mock},
+    "src.features.product_review_features": {"run_review_features": _run_rev_mock},
+    "src.features": {},
+    "src": {},
 }.items():
     m = types.ModuleType(_name)
     for k, v in _attrs.items():
@@ -53,8 +65,8 @@ def _load():
 
 M = _load()
 
-_fin = sys.modules["financial_features"]
-_rev = sys.modules["product_review_features"]
+_fin = sys.modules["src.features.financial_features"]
+_rev = sys.modules["src.features.product_review_features"]
 
 def _reset():
     _fin.run_financial_features.reset_mock()
@@ -122,9 +134,12 @@ def test_feature_financial_task_calls_run():
 def test_feature_financial_task_passes_correct_paths():
     _reset()
     M.feature_financial_task()
-    _, kwargs = _fin.run_financial_features.call_args
-    assert kwargs["input_path"].endswith("financial_preprocessed.csv")
-    assert kwargs["output_path"].endswith("financial_featured.csv")
+    args, kwargs = _fin.run_financial_features.call_args
+    # support both positional and keyword args
+    input_path  = kwargs.get("input_path",  args[0] if len(args) > 0 else None)
+    output_path = kwargs.get("output_path", args[1] if len(args) > 1 else None)
+    assert input_path  is not None and input_path.endswith("financial_preprocessed.csv")
+    assert output_path is not None and output_path.endswith("financial_featured.csv")
 
 def test_feature_financial_task_accepts_context():
     _reset()
@@ -151,7 +166,7 @@ def test_feature_review_task_calls_run():
 def test_feature_review_task_passes_correct_paths():
     _reset()
     M.feature_review_task()
-    _, kwargs = _rev.run_review_features.call_args
+    args, kwargs = _rev.run_review_features.call_args
     assert kwargs["reviews_path"].endswith("review_preprocessed.jsonl")
     assert kwargs["products_path"].endswith("product_preprocessed.jsonl")
     assert kwargs["product_output_path"].endswith("product_featured.jsonl")

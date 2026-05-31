@@ -1,0 +1,29 @@
+# =============================================================================
+# Prometheus Scrape Configuration — SavVio Local Development
+# =============================================================================
+# Used by the local Prometheus container to scrape the FastAPI /metrics endpoint.
+# In production (GCP Cloud Run), metrics are pushed via remote-write instead.
+# =============================================================================
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # -----------------------------------------------------------------------
+  # SavVio FastAPI API
+  # -----------------------------------------------------------------------
+  - job_name: "savvio-api"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["host.docker.internal:3500"]
+        labels:
+          environment: "local"
+          service: "savvio-api"
+
+  # -----------------------------------------------------------------------
+  # Prometheus self-monitoring
+  # -----------------------------------------------------------------------
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]

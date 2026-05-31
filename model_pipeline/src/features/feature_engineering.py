@@ -24,6 +24,7 @@ from features.affordability import add_affordability_features
 from features.feature_preprocessing import FeaturePipeline
 from deterministic_engine.labeling_pipeline import apply_deterministic_labels
 from data.db_loader import load_financial_profiles, load_products, load_reviews
+from data.bias_mitigation import assert_label_balance
 
 
 logger = logging.getLogger(__name__)
@@ -51,12 +52,12 @@ def compute_scenario_features(scenarios: pd.DataFrame) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 def generate_training_data(
-    financial_df: pd.DataFrame = None,
-    products_df: pd.DataFrame = None,
-    reviews_df: pd.DataFrame = None,
-    n_scenarios: int = None,
-    random_state: int = None,
-    output_path: str = Config.SCENARIO_OUTPUT_PATH,
+    financial_df=None,
+    products_df=None,
+    reviews_df=None,
+    n_scenarios=None,
+    random_state=None,
+    output_path=None,
 ):
     """
     End-to-end training data creation: sample pairs → compute features → label.
@@ -85,11 +86,15 @@ def generate_training_data(
         products_df,
         n_scenarios=n_scenarios,
         random_state=random_state,
+        reviews_df=reviews_df,       #  pass reviews for full mitigation
+        apply_mitigations=True,       # explicit flag
     )
 
     scenarios_raw = compute_scenario_features(scenarios_raw)
 
     scenarios_raw = apply_deterministic_labels(scenarios_raw, products_df, reviews_df)
+
+    assert_label_balance(scenarios_raw, label_col="final_recommendation")
 
     if output_path:
         os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)

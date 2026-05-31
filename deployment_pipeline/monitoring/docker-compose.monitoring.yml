@@ -1,0 +1,66 @@
+# =============================================================================
+# SavVio Monitoring Stack — Local Development
+# =============================================================================
+# Spins up Prometheus + Grafana for local dashboard development and testing.
+#
+# Usage:
+#   cd deployment_pipeline/monitoring
+#   docker-compose -f docker-compose.monitoring.yml up -d
+#
+# Access:
+#   Prometheus:  http://localhost:9090
+#   Grafana:     http://localhost:3001  (admin / savvio)
+#
+# Prerequisites:
+#   The SavVio API must be running locally on port 3500:
+#     uvicorn deployment_pipeline.api.main:app --host 0.0.0.0 --port 3500
+# =============================================================================
+
+services:
+  # -----------------------------------------------------------------------
+  # Prometheus — metrics collection & storage
+  # -----------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: savvio-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=7d"
+      - "--web.enable-lifecycle"
+    restart: unless-stopped
+    networks:
+      - monitoring
+
+  # -----------------------------------------------------------------------
+  # Grafana — dashboards & visualization
+  # -----------------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: savvio-grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=savvio
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    networks:
+      - monitoring
+
+volumes:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  monitoring:
+    driver: bridge

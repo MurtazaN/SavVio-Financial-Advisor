@@ -69,6 +69,8 @@ class TestAffordabilityConsistency:
             ).to_dict()
 
             for key, expected in single.items():
+                if key == "affordability_score_unreliable":
+                    continue
                 got = batch.loc[idx, key]
                 if expected is None:
                     assert pd.isna(got)

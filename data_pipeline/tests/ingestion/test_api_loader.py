@@ -99,7 +99,7 @@ def _mock_response(json_data, status_code=200):
 
 def _make_loader(**kwargs):
     """Instantiate APILoader with requests.Session patched out."""
-    with patch("requests.Session"):
+    with patch("api_loader.requests.Session"):  # patch api_loader's own binding
         return APILoader(base_url="https://api.example.com", **kwargs)
 
 
@@ -113,7 +113,7 @@ def test_init_sets_base_url():
 
 
 def test_init_strips_trailing_slash():
-    with patch("requests.Session"):
+    with patch("api_loader.requests.Session"):  # patch api_loader's own binding
         loader = APILoader(base_url="https://api.example.com/")
     assert loader.base_url == "https://api.example.com"
 
@@ -166,20 +166,18 @@ def test_make_request_passes_params():
 
 
 def test_make_request_raises_on_timeout():
-    import requests
     loader = _make_loader()
-    loader.session.request.side_effect = requests.exceptions.Timeout
-    with pytest.raises(requests.exceptions.Timeout):
+    loader.session.request.side_effect = M.requests.exceptions.Timeout
+    with pytest.raises(M.requests.exceptions.Timeout):
         loader._make_request("/ep")
 
 
 def test_make_request_raises_on_http_error():
-    import requests
     loader = _make_loader()
     resp = _mock_response({}, status_code=500)
-    resp.raise_for_status.side_effect = requests.exceptions.HTTPError("500")
+    resp.raise_for_status.side_effect = M.requests.exceptions.HTTPError("500")
     loader.session.request.return_value = resp
-    with pytest.raises(requests.exceptions.HTTPError):
+    with pytest.raises(M.requests.exceptions.HTTPError):
         loader._make_request("/ep")
 
 

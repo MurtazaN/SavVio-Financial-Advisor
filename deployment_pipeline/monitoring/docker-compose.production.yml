@@ -1,0 +1,34 @@
+# =============================================================================
+# SavVio Monitoring Stack — Production (GCE Pipeline VM)
+# =============================================================================
+# Runs Prometheus only — Grafana is hosted on Grafana Cloud.
+# The prometheus.yml is rendered from prometheus.production.yml via envsubst
+# in CI/CD and placed at /opt/savvio-monitoring/prometheus/prometheus.yml.
+#
+# Deployed and managed by the deploy-monitoring CI/CD job.
+# =============================================================================
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: savvio-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=15d"
+      - "--web.enable-lifecycle"
+      - "--web.listen-address=0.0.0.0:9090"
+    restart: unless-stopped
+    networks:
+      - monitoring
+
+volumes:
+  prometheus-data:
+
+networks:
+  monitoring:
+    driver: bridge

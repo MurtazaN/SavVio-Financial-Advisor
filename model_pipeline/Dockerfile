@@ -26,9 +26,9 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Copy and install requirements
-COPY model-requirements.txt .
+COPY requirements.txt .
 RUN pip install --upgrade pip && \
-    pip install -r model-requirements.txt
+    pip install -r requirements.txt
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \

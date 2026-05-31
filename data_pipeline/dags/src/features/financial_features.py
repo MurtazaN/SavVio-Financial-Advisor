@@ -19,7 +19,6 @@ import pandas as pd
 import numpy as np
 
 from src.features.utils import setup_logging, ensure_output_dir
-from src.incremental import merge_csv
 
 # Configure module logging.
 setup_logging()
@@ -181,12 +180,8 @@ def run_financial_features(input_path: str, output_path: str) -> None:
         temp_output = output_path + ".new.tmp"
         df.to_csv(temp_output, index=False)
 
-        if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-            merge_stats = merge_csv(temp_output, output_path, key_cols=["user_id"])
-            os.remove(temp_output)
-            logger.info("Incremental merge stats: %s", merge_stats)
-        else:
-            os.replace(temp_output, output_path)
+        # Each run is independent — overwrite the output directly.
+        os.replace(temp_output, output_path)
 
         logger.info(f"Saved featured data to {output_path}")
         logger.info(f"Sample features:\n{df[numeric_cols].head()}")

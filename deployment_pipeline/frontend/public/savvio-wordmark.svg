@@ -1,0 +1,122 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 490 148">
+  <defs>
+    <!--
+      Vertical gradient matching savvio-logo.svg exactly:
+        y=22  →  #6ee7b7  (mint,         cap tops)
+        y=70  →  #10b981  (brand teal,   mid)
+        y=118 →  #064e3b  (deep emerald, baseline)
+    -->
+    <linearGradient id="mainGrad" gradientUnits="userSpaceOnUse"
+                    x1="245" y1="22" x2="245" y2="118">
+      <stop offset="0%"   stop-color="#6ee7b7"/>
+      <stop offset="50%"  stop-color="#10b981"/>
+      <stop offset="100%" stop-color="#064e3b"/>
+    </linearGradient>
+
+    <linearGradient id="shadowGrad" gradientUnits="userSpaceOnUse"
+                    x1="245" y1="22" x2="245" y2="118">
+      <stop offset="0%"   stop-color="#064e3b"/>
+      <stop offset="100%" stop-color="#022c22"/>
+    </linearGradient>
+  </defs>
+
+  <!-- ═══════════════════════════════════════
+       SHADOW LAYER  (+6, +6  — same offset
+       as savvio-logo.svg)
+       ═══════════════════════════════════════ -->
+  <g fill="none" stroke="url(#shadowGrad)"
+     stroke-width="18" stroke-linecap="round" stroke-linejoin="round">
+
+    <!-- S  upper bowl -->
+    <path d="M 76,58
+             C 76,36 61,28 46,28
+             C 31,28 18,41 18,61
+             C 18,79 33,86 46,89"/>
+    <!-- S  lower bowl -->
+    <path d="M 46,89
+             C 59,92 76,101 76,114
+             C 76,124 61,124 46,124
+             C 31,124 18,116 18,108"/>
+
+    <!--
+      a — redesigned:
+          stem  : vertical right edge, full x-height
+          bowl  : c-shape open on the right, spans full x-height
+                  opening at top-right (y 62→74) covered by stem stroke
+                  opening at bottom-right (y 108→118) covered by stem stroke
+    -->
+    <path d="M 158,62 L 158,124"/>
+    <path d="M 158,74
+             C 158,62 146,62 134,62
+             C 121,62 110,74 110,90
+             C 110,106 121,124 134,124
+             C 146,124 158,118 158,108"/>
+
+    <!-- v  (lowercase diagonals, rounded join at base) -->
+    <path d="M 192,62 L 219,124 L 246,62"/>
+
+    <!-- V  (capital diagonals from cap-height) -->
+    <path d="M 280,28 L 313,124 L 346,28"/>
+
+    <!-- i  dot + stroke -->
+    <path d="M 380,22 L 380,30"/>
+    <path d="M 380,62 L 380,124"/>
+
+    <!-- o  closed oval (4-cubic approximation, k=0.5523) -->
+    <path d="M 468,93
+             C 468,76 456,62 441,62
+             C 426,62 414,76 414,93
+             C 414,110 426,124 441,124
+             C 456,124 468,110 468,93 Z"/>
+  </g>
+
+  <!-- ═══════════════════════════════════════
+       MAIN LAYER  (foreground)
+       ═══════════════════════════════════════ -->
+  <g fill="none" stroke="url(#mainGrad)"
+     stroke-width="18" stroke-linecap="round" stroke-linejoin="round">
+
+    <!-- S  upper bowl  (mint → teal) -->
+    <path d="M 70,52
+             C 70,30 55,22 40,22
+             C 25,22 12,35 12,55
+             C 12,73 27,80 40,83"/>
+    <!-- S  lower bowl  (teal → deep emerald) -->
+    <path d="M 40,83
+             C 53,86 70,95 70,108
+             C 70,118 55,118 40,118
+             C 25,118 12,110 12,102"/>
+
+    <!--
+      a — stem: full-height vertical at x=152
+          bowl: c-shape arc starting at upper-right opening (152,68),
+                sweeping counterclockwise across the top → down the left →
+                across the bottom → ending at lower-right opening (152,102).
+                Both 18px openings are fully covered by the stem stroke.
+    -->
+    <path d="M 152,56 L 152,118"/>
+    <path d="M 152,68
+             C 152,56 140,56 128,56
+             C 115,56 104,68 104,84
+             C 104,100 115,118 128,118
+             C 140,118 152,112 152,102"/>
+
+    <!-- v  (x-height, rounded base join) -->
+    <path d="M 186,56 L 213,118 L 240,56"/>
+
+    <!-- V  (cap-height, rounded base join) -->
+    <path d="M 274,22 L 307,118 L 340,22"/>
+
+    <!-- i  dot  (short segment → round linecap = circle) -->
+    <path d="M 374,16 L 374,24"/>
+    <!-- i  stroke -->
+    <path d="M 374,56 L 374,118"/>
+
+    <!-- o  (closed oval — gradient natural light-top / dark-bottom) -->
+    <path d="M 462,87
+             C 462,70 450,56 435,56
+             C 420,56 408,70 408,87
+             C 408,104 420,118 435,118
+             C 450,118 462,104 462,87 Z"/>
+  </g>
+</svg>

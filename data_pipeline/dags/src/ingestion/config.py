@@ -51,9 +51,9 @@ REVIEW_BLOB = os.getenv("REVIEW_BLOB", "raw/review_data.jsonl")
 # ============================================================================
 
 
-# Define Project Root (data_pipeline directory)
-# config.py is in data_pipeline/ingestion-scripts/
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+# Define Project Root (dags/ directory — shared volume mount accessible to all workers)
+# config.py is in dags/src/ingestion/config.py → .parent.parent.parent = dags/
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 REPO_ROOT = PROJECT_ROOT.parent
 
 # Base directory for data storage
@@ -91,14 +91,17 @@ REVIEW_RAW_PATH = str(RAW_DATA_DIR / "review_data.jsonl")
 # API Configuration (for production)
 # ============================================================================
 
-API_BASE_URL = os.getenv("API_BASE_URL", "https://api.savvio.com/v1")
+# Required when ENVIRONMENT=prod and DATA_SOURCE=api.
+# Set API_BASE_URL to the Cloud Run API URL in prod (e.g. https://savvio-dev-api-xxx.run.app).
+# Unused in dev/gcs mode — no default to avoid accidentally hitting a wrong endpoint.
+API_BASE_URL = os.getenv("API_BASE_URL", "")
 API_KEY = os.getenv("API_KEY")
 API_TIMEOUT = int(os.getenv("API_TIMEOUT", "30"))
 
-# API endpoints
-FINANCIAL_API_ENDPOINT = os.getenv("FINANCIAL_API_ENDPOINT", f"{API_BASE_URL}/financial")
-PRODUCT_API_ENDPOINT = os.getenv("PRODUCT_API_ENDPOINT", f"{API_BASE_URL}/products")
-REVIEW_API_ENDPOINT = os.getenv("REVIEW_API_ENDPOINT", f"{API_BASE_URL}/reviews")
+# Endpoints derived from API_BASE_URL — set individually via env var to override.
+FINANCIAL_API_ENDPOINT = os.getenv("FINANCIAL_API_ENDPOINT", f"{API_BASE_URL}/financial" if API_BASE_URL else "")
+PRODUCT_API_ENDPOINT = os.getenv("PRODUCT_API_ENDPOINT", f"{API_BASE_URL}/products" if API_BASE_URL else "")
+REVIEW_API_ENDPOINT = os.getenv("REVIEW_API_ENDPOINT", f"{API_BASE_URL}/reviews" if API_BASE_URL else "")
 
 
 # ============================================================================

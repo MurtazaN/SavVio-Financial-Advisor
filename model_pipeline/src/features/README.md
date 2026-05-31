@@ -3,7 +3,7 @@
 This document covers two modules that work together to produce the training dataset:
 
 1. **`financial_features.py`** — Computes 6 financial features for a single user-product pair (used at inference time).
-2. **`training_data_generator.py`** — Generates 50K+ labeled scenarios by pairing real users with real products across graduated price tiers (used for ML training).
+2. **`training_data_generator.py`** — Generates 50K+ labeled scenarios by pairing real users with real products using a **stratified (3x3)** strategy (used for ML training).
 
 Source files:
 - `model_pipeline/src/features/financial_features.py`
@@ -109,42 +109,37 @@ Generates the labeled training dataset by pairing real user financial profiles w
 products, computing features, and applying the deterministic engine to produce
 GREEN/YELLOW/RED labels. The output CSV is used to train the downstream ML model.
 
-### Sampling strategies
+### Sampling strategy: 3x3 Stratified Sampling
 
-The generator supports three strategies (controlled by `graduated` and `stratified` parameters):
+The generator uses a single, high-coverage **stratified** strategy to ensure the ML model sees a balanced representation of all financial scenarios, especially edge cases (e.g., low-income users considering premium products).
 
-#### 1. Graduated (default, recommended)
+#### The 9-Cell Grid
 
-Each user evaluates one product per price tier in ascending order: **budget → mid → premium**.
-This simulates a realistic shopping session where a user considers increasingly expensive items.
+We divide the user base into 3 income brackets and the product pool into 3 price brackets, creating a 9-cell matrix. Each cell is sampled equally (`n_scenarios / 9` rows per cell), ensuring that rare but critical combinations (like "Low Income" + "Premium Product") are well-represented in the training data.
 
-**Key behaviors:**
-- **Cumulative spending** — After each GREEN/YELLOW purchase, the product price is deducted
-  from the user's available resources (DI first, then savings) before evaluating the next tier.
-- **RED early-stop** — If a user gets RED on any tier, they stop. No further tiers are evaluated
-  (the engine already determined this user can't afford more).
-- **Session grouping** — Each user's graduated journey is assigned a `session_id` and rows are
-  sorted so tiers appear consecutively: budget → mid → premium.
+| Income \ Price | Budget ($100–$500) | Mid ($500–$1,500) | Premium ($1,500+) |
+|----------------|:------------------:|:----------------:|:-----------------:|
+| **Low** (<$3k)  | Cell 1             | Cell 2           | Cell 3            |
+| **Mid** ($3k–$7k)| Cell 4             | Cell 5           | Cell 6            |
+| **High** (>$7k) | Cell 7             | Cell 8           | Cell 9            |
 
-**Price tier bins (current):**
+**Key Behaviors:**
+- **Edge-Case Focus**: Unlike random sampling, which would be 99% "Mid-Income" + "Budget Product", this ensures it sees plenty of RED and YELLOW triggers.
+- **Quota Redistribution**: If any cell is empty (unlikely with our current DB), its row quota is redistributed evenly across the remaining valid cells.
+- **Replaced Sampling**: To reach 50,000+ rows from smaller tables, sampling is performed with replacement (`replace=True`).
 
-| Tier    | Price range      | Product pool |
-|---------|-----------------|-------------|
-| budget  | $100 – $500     | 6,700       |
-| mid     | $500 – $1,500   | 881         |
-| premium | $1,500+         | 454         |
+### Bracket boundaries
 
-Products under $100 are excluded — they're always GREEN and provide no learning signal.
+| Bracket | Range | Why? |
+|---------|-------|------|
+| **Income: Low** | $0 – $3,000 | Covers the bottom 30% of users, most vulnerable to price-to-income spikes. |
+| **Income: Mid** | $3,000 – $7,000 | The core user segment (P40 to P90). |
+| **Income: High** | $7,000+ | Users who only trigger RED/YELLOW on the most expensive premium items. |
+| **Price: Budget** | $100 – $500 | Items affordable for most, but stress-test for low-income users. |
+| **Price: Mid** | $500 – $1,500 | Items significant for almost all users (PIR > 0.10). |
+| **Price: Premium** | $1,500+ | Luxury/major items that drive residual utility (Runway) risk. |
 
-#### 2. Stratified
-
-Equal representation across income × price bracket combinations (3 income × 3 price = 9 cells).
-Each cell gets `n_scenarios / 9` rows. Used when you want balanced coverage without the
-session/cumulative-spending semantics.
-
-#### 3. Random
-
-Pure uniform random pairing. Legacy mode for quick experiments.
+Products under **$100** are excluded entirely as they are trivially GREEN for almost all users and provide no learning signal for the model.
 
 ### Output schema
 
@@ -158,8 +153,8 @@ Each row in `training_scenarios.csv` represents one (user, product) evaluation:
 | `product_id` | Product identifier |
 | `product_price` | Product price |
 | `monthly_income` | User's monthly income (unchanged across tiers) |
-| `discretionary_income` | User's DI **at the time of this evaluation** (decreases across tiers as prior purchases consume it) |
-| `liquid_savings` | User's savings **at the time of this evaluation** (decreases only when DI is exhausted) |
+| `discretionary_income` | User's DI at the time of evaluation |
+| `liquid_savings` | User's savings at the time of evaluation |
 | `affordability_score` | Computed feature (6 total) |
 | `price_to_income_ratio` | Computed feature |
 | `residual_utility_score` | Computed feature |
@@ -169,29 +164,7 @@ Each row in `training_scenarios.csv` represents one (user, product) evaluation:
 | `financial_label` | Final label: GREEN / YELLOW / RED (after both Layer 1 and Layer 2) |
 | `downgraded` | `1` if Layer 2 (downgrade engine) changed the label, `0` otherwise |
 
-### How a graduated session works — step by step
-
-```
-User U31070: DI = -$798.53, Savings = $16,354.36
-
-1. Budget tier ($189.99):
-   - DI is negative → savings cover $189.99
-   - Savings: $16,354 → $16,164
-   - Engine evaluates: GREEN
-   - User proceeds to next tier.
-
-2. Mid tier ($1,299.95):
-   - DI still negative → savings cover $1,299.95
-   - Savings: $16,164 → $14,864
-   - Engine evaluates: GREEN
-   - User proceeds to next tier.
-
-3. Premium tier ($1,889.00):
-   - DI still negative → savings cover $1,889
-   - Savings: $14,864 → $12,975
-   - Engine evaluates: RED (savings_to_price_ratio dropped below threshold)
-   - Session stops. User gets 3 rows in the output.
-```
+(Section removed: Generator now uses independent stratified sampling to maximize model exposure to varied financial states.)
 
 ### Layer 2 downgrade
 
@@ -211,12 +184,10 @@ and rows are sorted by `(session_id, tier_order)` so each user's journey is cont
 from features.training_data_generator import generate_scenarios
 
 scenarios = generate_scenarios(
-    financial_profiles=financial_df,   # DataFrame from DB
-    products=products_df,              # DataFrame from DB
-    reviews_df=reviews_df,             # Optional — enables Layer 2
+    financial_profiles=financial_df,
+    products=products_df,
     n_scenarios=50000,
     random_state=42,
-    graduated=True,                    # default
 )
 scenarios.to_csv("training_scenarios.csv", index=False)
 ```
@@ -225,9 +196,9 @@ scenarios.to_csv("training_scenarios.csv", index=False)
 
 | Label  | Count  | %     |
 |--------|-------:|------:|
-| GREEN  | 36,391 | 72.8% |
-| YELLOW | 5,176  | 10.4% |
-| RED    | 8,432  | 16.9% |
+| GREEN  | 24,030 | 48.1% |
+| RED    | 17,555 | 35.1% |
+| YELLOW | 8,415  | 16.8% |
 
 224 rows were downgraded by Layer 2.
 ## Product & Review Features (Layer 2 Inputs)
@@ -541,11 +512,11 @@ in the upper tiers (314 premium products vs 454 in the chosen config).
 PRICE_BINS  = [100, 500, 1_500, float("inf")]
 PRICE_LABELS = ["budget", "mid", "premium"]
 
-INCOME_BINS  = [0, 3_000, 5_000, float("inf")]
+INCOME_BINS  = [0, 3_000, 7_000, float("inf")]
 INCOME_LABELS = ["low", "mid", "high"]
 ```
 
-Label distribution on 50,000 scenarios: **GREEN 72.8% / YELLOW 10.4% / RED 16.9%**
+Label distribution on 50,000 scenarios: **GREEN 48.1% / YELLOW 16.8% / RED 35.1%**
 
 ---
 

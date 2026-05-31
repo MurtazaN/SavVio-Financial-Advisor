@@ -26,7 +26,7 @@ import argparse
 import logging
 import os
 import sys
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 
 import numpy as np
 import pandas as pd
@@ -35,7 +35,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import Config
-from data.db_loader import load_financial_profiles, load_products
+from data.db_loader import load_financial_profiles, load_products, load_reviews
 
 logger = logging.getLogger(__name__)
 
@@ -121,8 +121,15 @@ def _sample_stratified(
         user_sample = income_groups[ig_label].sample(
             n=count, replace=True, random_state=seed,
         )
-        prod_sample = price_groups[pg_label].sample(
-            n=count, replace=True, random_state=seed + 1,
+        prod_group = price_groups[pg_label]
+        weights = None
+        if "sample_weight" in prod_group.columns:
+            w = pd.to_numeric(prod_group["sample_weight"], errors="coerce").fillna(1.0)
+            # Guard against invalid/non-positive weights.
+            if (w > 0).any():
+                weights = w
+        prod_sample = prod_group.sample(
+            n=count, replace=True, random_state=seed + 1, weights=weights,
         )
         user_chunks.append(user_sample)
         prod_chunks.append(prod_sample)
@@ -165,12 +172,14 @@ def _merge_pairs(
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
-
+from data.bias_mitigation import apply_all_mitigations
 def generate_scenarios(
     financial_profiles: pd.DataFrame,
     products: pd.DataFrame,
     n_scenarios: int = 10_000,
     random_state: int = 42,
+    reviews_df: Optional[pd.DataFrame] = None,
+    apply_mitigations: bool = False,
 ) -> pd.DataFrame:
     """
     Generate raw user-product scenario pairs.
@@ -190,6 +199,14 @@ def generate_scenarios(
         or labels are included.
     """
     rng = np.random.default_rng(random_state)
+
+    if apply_mitigations:
+        financial_profiles, products, _ = apply_all_mitigations(
+            financial_profiles,
+            products,
+            reviews_df if reviews_df is not None else pd.DataFrame(),
+            random_state=random_state,
+        )
 
     # Single, stratified sampling strategy.
     users, prods = _sample_stratified(
@@ -236,8 +253,14 @@ def main():
     print("\n[1/2] Loading data from PostgreSQL...")
     fin_df = load_financial_profiles()
     prod_df = load_products()
+    rev_df = load_reviews()
     print(f"      Financial profiles: {len(fin_df):,}")
     print(f"      Products:           {len(prod_df):,}")
+    print(f"      Reviews:            {len(rev_df):,}")
+
+    # Apply pre-training bias mitigations BEFORE scenario generation
+    fin_df, prod_df, rev_df = apply_all_mitigations(fin_df, prod_df, rev_df)
+
 
     print(f"\n[2/2] Sampling {args.n_scenarios:,} raw scenarios (stratified)...")
     scenarios = generate_scenarios(

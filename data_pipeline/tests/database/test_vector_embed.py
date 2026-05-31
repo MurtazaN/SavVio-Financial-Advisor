@@ -153,14 +153,20 @@ def _mock_engine():
 def test_store_product_embeddings_executes_db_calls():
     engine, conn = _mock_engine()
     dim = getattr(M, "EMBEDDING_DIM", 384)
-    M.store_product_embeddings(engine, ["p1","p2","p3"], np.zeros((3,dim), dtype=np.float32))
-    assert conn.execute.call_count == 3
+    insert_size = getattr(M, "insert_size", 500)
+    n = 3
+    M.store_product_embeddings(engine, ["p1","p2","p3"], np.zeros((n,dim), dtype=np.float32))
+    expected_calls = -(-n // insert_size)  # ceiling division = number of batches
+    assert conn.execute.call_count == expected_calls
 
 def test_store_review_embeddings_executes_db_calls():
     engine, conn = _mock_engine()
     dim = getattr(M, "EMBEDDING_DIM", 384)
-    M.store_review_embeddings(engine, ["p1","p2"], ["u1","u2"], np.zeros((2,dim), dtype=np.float32))
-    assert conn.execute.call_count == 2
+    insert_size = getattr(M, "insert_size", 500)
+    n = 2
+    M.store_review_embeddings(engine, ["p1","p2"], ["u1","u2"], np.zeros((n,dim), dtype=np.float32))
+    expected_calls = -(-n // insert_size)
+    assert conn.execute.call_count == expected_calls
 
 # =============================================================================
 # 7) embed_products / embed_reviews tests

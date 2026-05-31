@@ -87,6 +87,47 @@ _ing = _make_stub("ingestion", config=_cfg,
                   gcs_loader=_gcs_stub, api_loader=_api_stub)
 
 # ---------------------------------------------------------------------------
+# CRITICAL: run_ingestion.py imports from 'src.ingestion.X', not 'ingestion.X'.
+# Register the SAME stubs under both paths so the mocks are actually used.
+# Without this, run_ingestion.py would load the real gcs_loader/api_loader
+# and make real GCS/HTTP calls during unit tests.
+# ---------------------------------------------------------------------------
+sys.modules["src.ingestion.config"]     = _cfg
+sys.modules["src.ingestion.gcs_loader"] = _gcs_stub
+sys.modules["src.ingestion.api_loader"] = _api_stub
+sys.modules["src.ingestion"]            = _ing
+
+# Also stub src.utils (imported by api_loader at module level)
+import logging as _logging
+_utils_stub = _make_stub(
+    "src.utils",
+    setup_logging=lambda *a, **kw: _logging.basicConfig()
+)
+
+# Force-install the requests stub AFTER everything else, overriding any
+# already-imported real 'requests' (e.g. from hydra-core, Faker, etc.).
+# Using sys.modules.setdefault only sets if absent — we need to force here.
+_req_stub = types.ModuleType("requests")
+_req_stub.Session = MagicMock()
+_req_exc = types.ModuleType("requests.exceptions")
+_req_exc.Timeout          = Exception
+_req_exc.HTTPError        = Exception
+_req_exc.RequestException = Exception
+_req_stub.exceptions = _req_exc   # ← needed so test_api_loader.py can do requests.exceptions.X
+sys.modules["requests"] = _req_stub
+sys.modules["requests.exceptions"] = _req_exc
+
+_req_exc = types.ModuleType("requests.exceptions")
+_req_exc.Timeout          = Exception
+_req_exc.HTTPError        = Exception
+_req_exc.RequestException = Exception
+sys.modules["requests.exceptions"] = _req_exc
+
+_req_adp = types.ModuleType("requests.adapters")
+_req_adp.HTTPAdapter = MagicMock()
+sys.modules["requests.adapters"] = _req_adp
+
+# ---------------------------------------------------------------------------
 # Load module under test
 # ---------------------------------------------------------------------------
 def _load():

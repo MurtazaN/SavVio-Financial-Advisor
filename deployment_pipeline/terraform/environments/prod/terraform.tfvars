@@ -1,0 +1,10 @@
+project_id  = "savvio-ai"
+region      = "us-east1"
+zone        = "us-east1-b"
+environment = "prod"
+db_tier     = "db-g1-small"
+
+# CI/CD overrides these via: terraform apply -var="api_image=..."
+api_image      = "gcr.io/cloudrun/placeholder"
+frontend_image = "gcr.io/cloudrun/placeholder"
+mlflow_image   = "gcr.io/cloudrun/placeholder"

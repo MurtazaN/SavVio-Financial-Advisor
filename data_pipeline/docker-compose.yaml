@@ -62,10 +62,11 @@ x-airflow-common:
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
     AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres/airflow
     AIRFLOW__CELERY__BROKER_URL: redis://:@redis:6379/0
-    AIRFLOW__CORE__FERNET_KEY: ''
-    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
-    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
-    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: 'http://airflow-apiserver:8080/execution/'
+    AIRFLOW__CORE__FERNET_KEY: ""
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DAGBAG_IMPORT_TIMEOUT: "120"
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-apiserver:8080/execution/"
     # Package root for the data pipeline so "from src.xxx import ..." works
     PYTHONPATH: /opt/airflow/dags
 
@@ -73,16 +74,16 @@ x-airflow-common:
     AIRFLOW_CONN_SMTP_DEFAULT: '{"conn_type": "smtp", "host": "smtp.gmail.com", "port": 587, "login": "${SMTP_USER}", "password": "${SMTP_PASSWORD}", "extra": {"from_email": "${SMTP_USER}", "disable_ssl": true, "disable_tls": false}}'
 
     # Slack Webhook connection for SlackWebhookOperator
-    AIRFLOW_CONN_SLACK_WEBHOOK: 'http://:${SLACK_WEBHOOK_URL}@https%3A%2F%2Fhooks.slack.com%2Fservices'
+    AIRFLOW_CONN_SLACK_WEBHOOK: "http://:${SLACK_WEBHOOK_URL}@https%3A%2F%2Fhooks.slack.com%2Fservices"
 
     # yamllint disable rule:line-length
     # Use simple http server on scheduler for health checks
     # See https://airflow.apache.org/docs/apache-airflow/stable/administration-and-deployment/logging-monitoring/check-health.html#scheduler-health-check-server
     # yamllint enable rule:line-length
-    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
-    _PIP_ADDITIONAL_REQUIREMENTS: ''
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
+    _PIP_ADDITIONAL_REQUIREMENTS: ""
     # The following line can be used to set a custom config file, stored in the local config folder
-    AIRFLOW_CONFIG: '/opt/airflow/config/airflow.cfg'
+    AIRFLOW_CONFIG: "/opt/airflow/config/airflow.cfg"
   volumes:
     - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
     - ${AIRFLOW_PROJ_DIR:-.}/logs:/opt/airflow/logs
@@ -106,7 +107,7 @@ services:
     volumes:
       - postgres-db-volume:/var/lib/postgresql/data
     healthcheck:
-      test: [ "CMD", "pg_isready", "-U", "airflow" ]
+      test: ["CMD", "pg_isready", "-U", "airflow"]
       interval: 10s
       retries: 5
       start_period: 5s
@@ -119,11 +120,29 @@ services:
     expose:
       - 6379
     healthcheck:
-      test: [ "CMD", "redis-cli", "ping" ]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 30s
       retries: 50
       start_period: 30s
+    restart: always
+
+  # ---- Cloud SQL Auth Proxy (application data) ----
+  # Provides a TCP connection to Cloud SQL for DAGs that read/write application
+  # data (financial_profiles, products, reviews, vector embeddings, etc.).
+  # Airflow's own metadata DB remains the local 'postgres' service above.
+  # Auth: uses the GCE VM's service account via the metadata server.
+  # Set DB_INSTANCE_CONNECTION_NAME in .env to your Cloud SQL connection name
+  # (e.g. savvio-purchase-guardrail:us-east1:savvio-dev-db-instance).
+  # Point application DB_HOST=cloud-sql-proxy in .env for DAG tasks.
+  cloud-sql-proxy:
+    image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.14.1
+    command:
+      - "${DB_INSTANCE_CONNECTION_NAME:-savvio-purchase-guardrail:us-east1:savvio-dev-db-instance}"
+      - "--address=0.0.0.0"
+      - "--port=5432"
+    expose:
+      - "5432"
     restart: always
 
   airflow-apiserver:
@@ -132,7 +151,7 @@ services:
     ports:
       - "8080:8080"
     healthcheck:
-      test: [ "CMD", "curl", "--fail", "http://localhost:8080/api/v2/version" ]
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/api/v2/version"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -147,11 +166,11 @@ services:
     <<: *airflow-common
     command: scheduler
     healthcheck:
-      test: [ "CMD", "curl", "--fail", "http://localhost:8974/health" ]
+      test: ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob"]
       interval: 30s
-      timeout: 10s
+      timeout: 30s
       retries: 5
-      start_period: 30s
+      start_period: 60s
     restart: always
     depends_on:
       <<: *airflow-common-depends-on
@@ -162,11 +181,11 @@ services:
     <<: *airflow-common
     command: dag-processor
     healthcheck:
-      test: [ "CMD-SHELL", 'airflow jobs check --job-type DagProcessorJob --hostname "$${HOSTNAME}"' ]
+      test: ["CMD-SHELL", "airflow jobs check --job-type DagProcessorJob"]
       interval: 30s
-      timeout: 10s
+      timeout: 30s
       retries: 5
-      start_period: 30s
+      start_period: 60s
     restart: always
     depends_on:
       <<: *airflow-common-depends-on
@@ -176,7 +195,7 @@ services:
   airflow-worker:
     <<: *airflow-common
     command: celery worker
-    mem_limit: 4G
+    mem_limit: 5G
     ports:
       - "5555:5555"
     healthcheck:
@@ -185,11 +204,12 @@ services:
         - "CMD-SHELL"
         - 'celery --app airflow.providers.celery.executors.celery_executor.app inspect ping -d "celery@$${HOSTNAME}" || celery --app airflow.executors.celery_executor.app inspect ping -d "celery@$${HOSTNAME}"'
       interval: 30s
-      timeout: 10s
+      timeout: 30s
       retries: 5
-      start_period: 30s
+      start_period: 60s
     environment:
       <<: *airflow-common-env
+      AIRFLOW__CELERY__WORKER_CONCURRENCY: "4"
       # Required to handle warm shutdown of the celery workers properly
       # See https://airflow.apache.org/docs/docker-stack/entrypoint.html#signal-propagation
       DUMB_INIT_SETSID: "0"
@@ -205,11 +225,11 @@ services:
     <<: *airflow-common
     command: triggerer
     healthcheck:
-      test: [ "CMD-SHELL", 'airflow jobs check --job-type TriggererJob --hostname "$${HOSTNAME}"' ]
+      test: ["CMD-SHELL", "airflow jobs check --job-type TriggererJob"]
       interval: 30s
-      timeout: 10s
+      timeout: 30s
       retries: 5
-      start_period: 30s
+      start_period: 60s
     restart: always
     depends_on:
       <<: *airflow-common-depends-on
@@ -301,11 +321,11 @@ services:
     # yamllint enable rule:line-length
     environment:
       <<: *airflow-common-env
-      _AIRFLOW_DB_MIGRATE: 'true'
-      _AIRFLOW_WWW_USER_CREATE: 'true'
+      _AIRFLOW_DB_MIGRATE: "true"
+      _AIRFLOW_WWW_USER_CREATE: "true"
       _AIRFLOW_WWW_USER_USERNAME: ${_AIRFLOW_WWW_USER_USERNAME:-airflow}
       _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD:-airflow}
-      _PIP_ADDITIONAL_REQUIREMENTS: ''
+      _PIP_ADDITIONAL_REQUIREMENTS: ""
     user: "0:0"
 
   airflow-cli:
@@ -334,7 +354,7 @@ services:
     ports:
       - "5555:5555"
     healthcheck:
-      test: [ "CMD", "curl", "--fail", "http://localhost:5555/" ]
+      test: ["CMD", "curl", "--fail", "http://localhost:5555/"]
       interval: 30s
       timeout: 10s
       retries: 5

@@ -25,36 +25,35 @@ logger = logging.getLogger(__name__)
 
 def _dev_url() -> str:
     """Local PostgreSQL connection string."""
-    user = os.environ["DB_USER"]
-    password = os.environ["DB_PASSWORD"]
-    host = os.environ["DB_HOST"]
-    port = os.environ["DB_PORT"]
-    name = os.environ["DB_NAME"]
+    user = os.environ.get("DB_USER", "postgres")
+    password = os.environ.get("DB_PASSWORD", "postgres")
+    host = os.environ.get("DB_HOST", "localhost")
+    port = os.environ.get("DB_PORT", "5432")
+    name = os.environ.get("DB_NAME", "savvio")
     return f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{name}"
 
 
 def _prod_url() -> str:
     """
     GCP Cloud SQL connection string.
-    Expects Cloud SQL Auth Proxy running locally or a Unix socket.
+    Supports two modes:
+    - TCP proxy (CI / local): DB_HOST=127.0.0.1
+    - Unix socket (Cloud Run): DB_HOST=/cloudsql/project:region:instance
     """
     user = os.environ["DB_USER"]
-    password = os.environ["DB_PASSWORD"]
+    # Cloud Run Terraform sets DB_PASS; CI/local uses DB_PASSWORD.
+    password = os.environ.get("DB_PASSWORD") or os.environ.get("DB_PASS", "")
     name = os.environ["DB_NAME"]
 
-    # Option A: Cloud SQL Auth Proxy on localhost (default)
     proxy_host = os.environ.get("DB_HOST", "127.0.0.1")
     proxy_port = os.environ.get("DB_PORT", "5432")
 
-    # Option B: Unix socket (uncomment if using socket-based proxy)
-    # project = os.environ["GCP_PROJECT"]
-    # region  = os.environ["GCP_REGION"]
-    # instance = os.environ["GCP_INSTANCE"]
-    # socket = f"/cloudsql/{project}:{region}:{instance}"
-    # return (
-    #     f"postgresql+psycopg2://{user}:{password}@/{name}"
-    #     f"?host={socket}"
-    # )
+    # Unix socket path (Cloud Run with Cloud SQL Auth Proxy volume mount)
+    if proxy_host.startswith("/"):
+        return (
+            f"postgresql+psycopg2://{user}:{password}@/{name}"
+            f"?host={proxy_host}"
+        )
 
     return f"postgresql+psycopg2://{user}:{password}@{proxy_host}:{proxy_port}/{name}"
 

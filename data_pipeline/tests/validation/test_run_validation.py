@@ -1,9 +1,5 @@
 """
 Tests for Validation Orchestration — run_validation.py.
-
-Covers the validation pipeline orchestrator: _handle_report (continue/halt/alert),
-_send_alert, the stage-specific task wrappers (validate_raw, validate_processed,
-validate_features, validate_anomalies), and the STAGE_MAP routing table.
 """
 import os
 import sys
@@ -16,7 +12,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 # ---------------------------------------------------------------------------
-# Path constants  (sys.path set up by conftest.py)
+# Path constants
 # ---------------------------------------------------------------------------
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 
@@ -75,6 +71,9 @@ class ValidationReport:
             "timestamp": "2026-01-01T00:00:00",
         }
 
+# ---------------------------------------------------------------------------
+# Stub all modules before loading run_validation
+# ---------------------------------------------------------------------------
 _vc = types.ModuleType("savviocore.validation.validation_config")
 _vc.Severity         = Severity
 _vc.CheckResult      = CheckResult
@@ -82,18 +81,39 @@ _vc.ValidationReport = ValidationReport
 _vc.load_thresholds  = lambda path=None: {}
 sys.modules["savviocore.validation.validation_config"] = _vc
 
-# Stub sub-validator modules
-for _mod in ("validate.raw_validator", "validate.processed_validator",
-             "savviocore.validation.feature_validator", "anomaly.anomaly_validator",
-             "validate", "anomaly", "savviocore", "savviocore.validation"):
-    if _mod not in sys.modules:
-        sys.modules[_mod] = types.ModuleType(_mod)
+_run_raw_mock              = MagicMock()
+_run_processed_mock        = MagicMock()
+_run_feature_mock          = MagicMock()
+_run_anomaly_mock          = MagicMock()
+_run_raw_anomaly_mock      = MagicMock()
 
-sys.modules["validate.raw_validator"].run_raw_validation          = MagicMock()
-sys.modules["validate.processed_validator"].run_processed_validation = MagicMock()
-sys.modules["savviocore.validation.feature_validator"].run_feature_validation  = MagicMock()
-sys.modules["anomaly.anomaly_validator"].run_anomaly_validation      = MagicMock()
-sys.modules["anomaly.anomaly_validator"].run_raw_anomaly_validation  = MagicMock()
+for _mod_name in (
+    "validate", "validate.raw_validator", "validate.processed_validator",
+    "src.validation.validate", "src.validation.validate.raw_validator",
+    "src.validation.validate.processed_validator",
+    "anomaly", "anomaly.anomaly_validator",
+    "src.validation.anomaly", "src.validation.anomaly.anomaly_validator",
+    "savviocore", "savviocore.validation", "savviocore.validation.feature_validator",
+    "src", "src.validation", "src.utils",
+):
+    if _mod_name not in sys.modules:
+        sys.modules[_mod_name] = types.ModuleType(_mod_name)
+
+sys.modules["src.utils"].setup_logging = lambda *a, **kw: None
+
+# Set mock functions on all possible import paths
+for _mod_name in ("validate.raw_validator", "src.validation.validate.raw_validator"):
+    sys.modules[_mod_name].run_raw_validation = _run_raw_mock
+
+for _mod_name in ("validate.processed_validator", "src.validation.validate.processed_validator"):
+    sys.modules[_mod_name].run_processed_validation = _run_processed_mock
+
+for _mod_name in ("savviocore.validation.feature_validator",):
+    sys.modules[_mod_name].run_feature_validation = _run_feature_mock
+
+for _mod_name in ("anomaly.anomaly_validator", "src.validation.anomaly.anomaly_validator"):
+    sys.modules[_mod_name].run_anomaly_validation     = _run_anomaly_mock
+    sys.modules[_mod_name].run_raw_anomaly_validation = _run_raw_anomaly_mock
 
 # ---------------------------------------------------------------------------
 # Load module under test
@@ -127,6 +147,13 @@ def _report(stage="raw", action="CONTINUE"):
         r.has_warnings = True
     return r
 
+def _reset():
+    _run_raw_mock.reset_mock()
+    _run_processed_mock.reset_mock()
+    _run_feature_mock.reset_mock()
+    _run_anomaly_mock.reset_mock()
+    _run_raw_anomaly_mock.reset_mock()
+
 
 # =============================================================================
 # 1) _handle_report
@@ -134,7 +161,7 @@ def _report(stage="raw", action="CONTINUE"):
 
 def test_handle_report_continue_does_not_raise():
     r = _report(action="CONTINUE")
-    M._handle_report(r)  # must not raise
+    M._handle_report(r)
 
 def test_handle_report_halt_raises_runtime_error_with_stage():
     r = _report(stage="processed", action="HALT")
@@ -164,49 +191,57 @@ def test_send_alert_called_on_alert(monkeypatch):
 # =============================================================================
 
 def test_validate_raw_returns_summary():
-    sys.modules["validate.raw_validator"].run_raw_validation.return_value = _report("raw", "CONTINUE")
+    _reset()
+    _run_raw_mock.return_value = _report("raw", "CONTINUE")
     result = M.validate_raw()
     assert isinstance(result, dict)
     assert "pipeline_action" in result
 
 def test_validate_raw_halts_on_critical():
-    sys.modules["validate.raw_validator"].run_raw_validation.return_value = _report("raw", "HALT")
+    _reset()
+    _run_raw_mock.return_value = _report("raw", "HALT")
     with pytest.raises(RuntimeError):
         M.validate_raw()
 
 def test_validate_processed_returns_summary():
-    sys.modules["validate.processed_validator"].run_processed_validation.return_value = _report("processed", "CONTINUE")
+    _reset()
+    _run_processed_mock.return_value = _report("processed", "CONTINUE")
     result = M.validate_processed()
     assert "pipeline_action" in result
 
 def test_validate_processed_halts_on_critical():
-    sys.modules["validate.processed_validator"].run_processed_validation.return_value = _report("processed", "HALT")
+    _reset()
+    _run_processed_mock.return_value = _report("processed", "HALT")
     with pytest.raises(RuntimeError):
         M.validate_processed()
 
 def test_validate_features_returns_summary():
-    sys.modules["savviocore.validation.feature_validator"].run_feature_validation.return_value = _report("features", "CONTINUE")
+    _reset()
+    _run_feature_mock.return_value = _report("features", "CONTINUE")
     result = M.validate_features()
     assert "pipeline_action" in result
 
 def test_validate_features_halts_on_critical():
-    sys.modules["savviocore.validation.feature_validator"].run_feature_validation.return_value = _report("features", "HALT")
+    _reset()
+    _run_feature_mock.return_value = _report("features", "HALT")
     with pytest.raises(RuntimeError):
         M.validate_features()
 
 def test_validate_raw_anomalies_never_halts():
-    """Tier-1 raw anomaly scan is INFO-only and must never halt."""
-    sys.modules["anomaly.anomaly_validator"].run_raw_anomaly_validation.return_value = _report("raw_anomaly", "CONTINUE")
+    _reset()
+    _run_raw_anomaly_mock.return_value = _report("raw_anomaly", "CONTINUE")
     result = M.validate_raw_anomalies()
     assert result["pipeline_action"] == "CONTINUE"
 
 def test_validate_anomalies_returns_summary():
-    sys.modules["anomaly.anomaly_validator"].run_anomaly_validation.return_value = _report("anomaly", "CONTINUE")
+    _reset()
+    _run_anomaly_mock.return_value = _report("anomaly", "CONTINUE")
     result = M.validate_anomalies()
     assert "pipeline_action" in result
 
 def test_validate_anomalies_halts_on_critical():
-    sys.modules["anomaly.anomaly_validator"].run_anomaly_validation.return_value = _report("anomaly", "HALT")
+    _reset()
+    _run_anomaly_mock.return_value = _report("anomaly", "HALT")
     with pytest.raises(RuntimeError):
         M.validate_anomalies()
 

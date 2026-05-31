@@ -25,8 +25,10 @@ Changes from v1:
 import os
 import logging
 import tempfile
+from typing import Optional
 
 import numpy as np
+import pandas as pd
 import matplotlib
 matplotlib.use("Agg")  # Non-interactive backend for headless environments.
 import matplotlib.pyplot as plt
@@ -46,7 +48,6 @@ from sklearn.preprocessing import label_binarize
 
 logger = logging.getLogger(__name__)
 
-# TODO - Add fairness matrix
 # ---------------------------------------------------------------------------
 # Visualization helpers
 # ---------------------------------------------------------------------------
@@ -158,7 +159,13 @@ def _log_per_class_metrics(y_true, y_pred, label_names):
 # Main evaluation function
 # ---------------------------------------------------------------------------
 
-def evaluate_model(model, X_test, y_test, label_names=None):
+def evaluate_model(
+    model,
+    X_test,
+    y_test,
+    label_names=None,
+    sensitive_df: Optional[pd.DataFrame] = None,
+):
     """
     Evaluate the model on the provided dataset.
 
@@ -166,17 +173,35 @@ def evaluate_model(model, X_test, y_test, label_names=None):
     and logs everything to the active MLflow run.
 
     Args:
-        model:       Trained model with .predict() and .predict_proba().
-        X_test:      Evaluation features.
-        y_test:      Evaluation labels (integer-encoded).
-        label_names: List of class names (e.g., ["GREEN", "RED", "YELLOW"]).
-                     If None, uses integer labels.
+        model:        Trained model with .predict() and optionally .predict_proba().
+        X_test:       Evaluation features.
+        y_test:       Evaluation labels (integer-encoded).
+        label_names:  List of class names (e.g., ["GREEN", "RED", "YELLOW"]).
+                      If None, uses integer labels.
+        sensitive_df: Row-aligned sensitive features for Fairlearn
+                      ``ThresholdOptimizer`` (post bias mitigation).
 
     Returns:
         Dict of aggregate metrics (accuracy, f1_score, roc_auc, pr_auc).
     """
-    y_pred = model.predict(X_test)
-    y_prob = model.predict_proba(X_test) if hasattr(model, "predict_proba") else None
+    try:
+        from guards.bias_detection import (
+            is_fairlearn_threshold_optimizer,
+            predict_with_sensitive_features,
+        )
+    except ImportError:
+
+        def predict_with_sensitive_features(m, X, s=None):
+            return m.predict(X)
+
+        def is_fairlearn_threshold_optimizer(m):
+            return False
+
+    y_pred = predict_with_sensitive_features(model, X_test, sensitive_df)
+    if hasattr(model, "predict_proba") and not is_fairlearn_threshold_optimizer(model):
+        y_prob = model.predict_proba(X_test)
+    else:
+        y_prob = None
 
     n_classes = len(np.unique(y_test))
     if label_names is None:

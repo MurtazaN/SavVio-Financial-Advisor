@@ -221,9 +221,10 @@ def test_upsert_df_empty_dataframe():
 def test_upsert_df_builds_correct_sql():
     engine, conn = _mock_engine()
     df = pd.DataFrame([{"user_id": "u1", "name": "Alice"}])
-    M._upsert_df(engine, df, "test_table", ["user_id"], ["name"])
-    conn.execute.assert_called_once()
-    sql_text = str(conn.execute.call_args[0][0])
+    with patch("psycopg2.extras.execute_values") as mock_ev:
+        M._upsert_df(engine, df, "test_table", ["user_id"], ["name"])
+    mock_ev.assert_called_once()
+    sql_text = mock_ev.call_args[0][1]
     assert "INSERT INTO test_table" in sql_text
     assert "ON CONFLICT (user_id)" in sql_text
     assert "name = EXCLUDED.name" in sql_text
@@ -236,15 +237,17 @@ def test_upsert_df_returns_row_count():
         {"user_id": "u1", "name": "Alice"},
         {"user_id": "u2", "name": "Bob"},
     ])
-    result = M._upsert_df(engine, df, "test_table", ["user_id"], ["name"])
+    with patch("psycopg2.extras.execute_values"):
+        result = M._upsert_df(engine, df, "test_table", ["user_id"], ["name"])
     assert result == 2
 
 
 def test_upsert_df_composite_conflict_cols():
     engine, conn = _mock_engine()
     df = pd.DataFrame([{"user_id": "u1", "product_id": "p1", "rating": 5}])
-    M._upsert_df(engine, df, "reviews", ["user_id", "product_id"], ["rating"])
-    sql_text = str(conn.execute.call_args[0][0])
+    with patch("psycopg2.extras.execute_values") as mock_ev:
+        M._upsert_df(engine, df, "reviews", ["user_id", "product_id"], ["rating"])
+    sql_text = mock_ev.call_args[0][1]
     assert "ON CONFLICT (user_id, product_id)" in sql_text
     assert "rating = EXCLUDED.rating" in sql_text
 
@@ -261,13 +264,12 @@ def test_load_financial_reads_and_loads(tmp_path):
     }]).to_csv(p, index=False)
 
     engine, conn = _mock_engine()
-    with patch.object(M, "_upsert_df", return_value=1) as mock_upsert:
+    with patch("psycopg2.extras.execute_values") as mock_ev:
         result = M.load_financial(engine, str(p))
     assert result == 1
-    mock_upsert.assert_called_once()
-    call_args = mock_upsert.call_args
-    assert call_args[0][2] == "financial_profiles"
-    assert call_args[0][3] == ["user_id"]
+    conn.execute.assert_called_once()  # TRUNCATE
+    mock_ev.assert_called_once()
+    assert "financial_profiles" in mock_ev.call_args[0][1]
 
 
 # =============================================================================
@@ -283,13 +285,12 @@ def test_load_products_reads_jsonl(tmp_path):
         }) + "\n")
 
     engine, conn = _mock_engine()
-    with patch.object(M, "_upsert_df", return_value=1) as mock_upsert:
+    with patch("psycopg2.extras.execute_values") as mock_ev:
         result = M.load_products(engine, str(p))
     assert result == 1
-    mock_upsert.assert_called_once()
-    call_args = mock_upsert.call_args
-    assert call_args[0][2] == "products"
-    assert call_args[0][3] == ["product_id"]
+    conn.execute.assert_called_once()  # TRUNCATE
+    mock_ev.assert_called_once()
+    assert "products" in mock_ev.call_args[0][1]
 
 
 # =============================================================================
@@ -306,16 +307,13 @@ def test_load_reviews_reads_jsonl(tmp_path):
         }) + "\n")
 
     engine, conn = _mock_engine()
-    # Mock the product_id lookup (simulates existing products in DB)
     mock_read_sql = pd.DataFrame({"product_id": ["p1"]})
     with patch("pandas.read_sql", return_value=mock_read_sql), \
-         patch.object(M, "_upsert_df", return_value=1) as mock_upsert:
+         patch("psycopg2.extras.execute_values") as mock_ev:
         result = M.load_reviews(engine, str(p))
     assert result == 1
-    mock_upsert.assert_called_once()
-    call_args = mock_upsert.call_args
-    assert call_args[0][2] == "reviews"
-    assert call_args[0][3] == ["user_id", "product_id"]
+    mock_ev.assert_called_once()
+    assert "reviews" in mock_ev.call_args[0][1]
 
 
 def test_load_reviews_drops_orphan_reviews(tmp_path):
@@ -327,13 +325,13 @@ def test_load_reviews_drops_orphan_reviews(tmp_path):
     engine, conn = _mock_engine()
     mock_read_sql = pd.DataFrame({"product_id": ["p1"]})  # only p1 exists
     with patch("pandas.read_sql", return_value=mock_read_sql), \
-         patch.object(M, "_upsert_df", return_value=1) as mock_upsert:
+         patch("psycopg2.extras.execute_values") as mock_ev:
         result = M.load_reviews(engine, str(p))
     assert result == 1  # orphan review filtered out
-    # Verify only 1 row was passed to upsert (the orphan was dropped)
-    upserted_df = mock_upsert.call_args[0][1]
-    assert len(upserted_df) == 1
-    assert upserted_df.iloc[0]["product_id"] == "p1"
+    # Verify only 1 tuple was passed to execute_values (the orphan was dropped)
+    mock_ev.assert_called_once()
+    tuples = mock_ev.call_args[0][2]
+    assert len(tuples) == 1
 
 
 # =============================================================================

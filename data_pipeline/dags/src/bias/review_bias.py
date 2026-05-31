@@ -387,14 +387,30 @@ def _profile_generic(col: str, series: pd.Series, total: int) -> List[FlagItem]:
 # Data loading
 # ---------------------------------------------------------------------------
 
+REVIEW_SAMPLE_SIZE = 100_000  # Bias signals are stable at 100k; loading 2.1M rows OOMs the worker
+
+
 def _load_review_data(preprocessed_path: str, featured_path: Optional[str] = None) -> pd.DataFrame:
     if not os.path.exists(preprocessed_path):
         raise FileNotFoundError(f"Preprocessed file not found: {preprocessed_path}")
-    df = pd.read_json(preprocessed_path, lines=True)
-    logger.info(f"Loaded {len(df)} records from {preprocessed_path}")
+    # Stream 2 chunks (100k rows) as a representative sample — avoids OOM on 785MB file.
+    # Bias signals (rating distribution, missingness, verified_purchase) are stable at this scale.
+    chunks = []
+    for chunk in pd.read_json(preprocessed_path, lines=True, chunksize=50_000):
+        chunks.append(chunk)
+        if sum(len(c) for c in chunks) >= REVIEW_SAMPLE_SIZE:
+            break
+    df = pd.concat(chunks, ignore_index=True).head(REVIEW_SAMPLE_SIZE)
+    logger.info(f"Sampled {len(df)} records (first {REVIEW_SAMPLE_SIZE} rows) for bias analysis")
 
     if featured_path and os.path.exists(featured_path):
-        feat = pd.read_json(featured_path, lines=True)
+        # Stream featured file with same sample cap to avoid OOM on large featured files.
+        feat_chunks = []
+        for chunk in pd.read_json(featured_path, lines=True, chunksize=50_000):
+            feat_chunks.append(chunk)
+            if sum(len(c) for c in feat_chunks) >= REVIEW_SAMPLE_SIZE:
+                break
+        feat = pd.concat(feat_chunks, ignore_index=True).head(REVIEW_SAMPLE_SIZE)
         # Prefer key-based merge to avoid silent misalignment from index join.
         merge_key_candidates = [["user_id", "asin"], ["user_id", "product_id"]]
         merged = False
